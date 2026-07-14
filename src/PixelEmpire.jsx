@@ -167,6 +167,15 @@ const PRICE_TIERS = [
   { id: "premium", name: "Premium",  rev: 1.25, fans: 0.8,  blurb: "Big-box pricing — backfires below a 70 score" },
 ];
 
+// On Smartphones the price tiers give way to a business model. Free games
+// spread further (fans) but monetize differently: ads earn thin revenue over
+// a much longer tail, IAP earns the most but costs review score and rep.
+const BIZ_MODELS = [
+  { id: "premium", name: "Premium",    rev: 0.75, fans: 0.8, blurb: "Pay up front — a hard sell on the app store" },
+  { id: "ads",     name: "Free + Ads", rev: 0.6,  fans: 1.6, tail: 2.2, blurb: "Huge reach, thin pennies — a long, slow earner" },
+  { id: "iap",     name: "Free + IAP", rev: 1.5,  fans: 1.2, blurb: "Whales pay the bills — critics and your rep take the hit" },
+];
+
 const TECH_TREE = [
   // Development
   { id: "agile",    cat: "Development", name: "Agile Workflow",   cost: 60, effect: "Projects finish ~15% faster" },
@@ -527,6 +536,7 @@ function computeScore(state, proj) {
   raw *= (0.9 + 0.1 * (state.morale / 80));
   if (size.id === "L") raw += 3;
   if (size.id === "AAA") raw += 5;
+  if (proj.platform === "mobile" && proj.biz === "iap") raw -= 5; // critics dock aggressive monetization
   raw += proj.vision || 0; // a strong pre-production pays off at review time
   if (proj.remakeOf) {
     raw += proj.remakeOf.mode === "remaster" ? 0 : 2;            // remakes build on a proven design
@@ -554,8 +564,15 @@ function launchSales(state, proj, score) {
     base *= (1 + Math.min(2, proj.ip.fans / 2500));    // the IP faithful buy day one
     base *= (1 - Math.min(0.4, proj.ip.fatigue / 250)); // fatigue caps the ceiling
   }
-  const priceTier = PRICE_TIERS.find(t => t.id === (proj.price || "std")) || PRICE_TIERS[1];
-  base *= priceTier.id === "premium" && score < 70 ? 0.85 : priceTier.rev; // premium flops get shredded in the value reviews
+  if (proj.platform === "mobile") {
+    const biz = BIZ_MODELS.find(b => b.id === (proj.biz || "premium")) || BIZ_MODELS[0];
+    base *= biz.rev;
+    // Brutal discoverability: without fans or hype, a mobile launch vanishes in the flood
+    base *= Math.max(0.25, Math.min(1.2, 0.25 + state.fans / 8000 + hype / 150));
+  } else {
+    const priceTier = PRICE_TIERS.find(t => t.id === (proj.price || "std")) || PRICE_TIERS[1];
+    base *= priceTier.id === "premium" && score < 70 ? 0.85 : priceTier.rev; // premium flops get shredded in the value reviews
+  }
   const trendy = matchesTrend(state.trend, proj.genre, proj.topic);
   if (trendy) base *= state.tech.includes("mktres") ? 1.65 : 1.45; // right game, right moment
   if (state.tech.includes("storefront")) base *= 1.15;
@@ -563,11 +580,12 @@ function launchSales(state, proj, score) {
   base *= mkt;
   if (proj.exclusive) base *= 1.25; // the platform holder's marketing machine
   const baseWeeks = score >= 80 ? 20 : score >= 60 ? 14 : 8;
+  const adsTail = proj.platform === "mobile" && (proj.biz || "premium") === "ads" ? 2.2 : 1;
   return {
     weeklyBase: base,
     trendy,
     mkt,
-    weeksLeft: Math.round(baseWeeks * (state.tech.includes("dlc") ? 1.25 : 1)),
+    weeksLeft: Math.round(baseWeeks * (state.tech.includes("dlc") ? 1.25 : 1) * adsTail),
   };
 }
 
@@ -1369,6 +1387,31 @@ function tick(prev) {
   // Sales on released games + live-service revenue
   let weekRevenue = 0;
   s.released = s.released.map(gm => {
+    if (gm.mmo) {
+      if (gm.sunset) return gm;
+      const health = gm.health ?? 0;
+      if (health <= 0) {
+        s.log = pushLog(s, `🌍 "${gm.name}" has gone dark — the last guild logged off and the servers went quiet.`);
+        return { ...gm, sunset: true, health: 0, subs: 0 };
+      }
+      // Subscriptions in, server bills out — an unhealthy MMO burns cash
+      const rev = (gm.subs || 0) * 0.25 * rnd(0.9, 1.1);
+      const serverCost = (gm.serverBase || 0) + (gm.subs || 0) * 0.10;
+      const net = rev - serverCost;
+      weekRevenue += net;
+      if (net < 0 && !gm.bleeding) s.log = pushLog(s, `🩸 "${gm.name}" is losing money — server bills now outrun subscriptions. Ship an expansion or sunset it.`);
+      const grown = health >= 70
+        ? Math.min(gm.subCap || Infinity, (gm.subs || 0) * 1.02)
+        : health >= 40 ? (gm.subs || 0) * 0.985 : (gm.subs || 0) * 0.94;
+      if (Math.random() < 0.35) s.fans += ri(2, 12);
+      return {
+        ...gm,
+        subs: Math.max(0, Math.round(grown * rnd(0.99, 1.01))),
+        health: Math.max(0, health - 2),
+        salesTotal: gm.salesTotal + rev,
+        bleeding: net < 0,
+      };
+    }
     if (gm.live) {
       if ((gm.health ?? 0) <= 0) {
         if (!gm.sunset) {
@@ -1844,7 +1887,17 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
 
   const setLive = (team, on) => update(prev => {
     const slot = slotOf(team);
-    return prev[slot] ? { ...prev, [slot]: { ...prev[slot], live: on } } : prev;
+    return prev[slot] ? { ...prev, [slot]: { ...prev[slot], live: on, mmo: false } } : prev;
+  });
+
+  const setMmo = (team, on) => update(prev => {
+    const slot = slotOf(team);
+    return prev[slot] ? { ...prev, [slot]: { ...prev[slot], mmo: on, live: false } } : prev;
+  });
+
+  const setBiz = (team, bizId) => update(prev => {
+    const slot = slotOf(team);
+    return prev[slot] ? { ...prev, [slot]: { ...prev[slot], biz: bizId } } : prev;
   });
 
   const toggleCrunch = team => update(prev => {
@@ -1869,11 +1922,13 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
     let { weeklyBase, weeksLeft, trendy, mkt } = launchSales(salesState, p, score);
     if (p.pubDeal) weeklyBase *= p.pubDeal.share;
     const priceTier = PRICE_TIERS.find(t => t.id === (p.price || "std")) || PRICE_TIERS[1];
-    const fanMult = (prev.tech.includes("fanclub") ? 1.5 : 1) * (trendy ? 1.25 : 1) * priceTier.fans;
+    const biz = p.platform === "mobile" ? BIZ_MODELS.find(b => b.id === (p.biz || "premium")) || BIZ_MODELS[0] : null;
+    const fanMult = (prev.tech.includes("fanclub") ? 1.5 : 1) * (trendy ? 1.25 : 1) * (biz ? biz.fans : priceTier.fans);
     const fanGain = Math.round(Math.pow(score / 10, 2.4) * 6 * fanMult);
     // Reputation moves with quality
     let repDelta = score >= 85 ? 4 : score >= 70 ? 2 : score < 40 ? -4 : 0;
     if (p.bugs > 8) repDelta -= 2; // shipping broken gets remembered
+    if (biz?.id === "iap") repDelta -= 2; // aggressive monetization gets remembered too
     const reviews = REVIEWERS.map(r => ({
       outlet: r,
       score: Math.max(5, Math.min(99, score + ri(-6, 6))),
@@ -1884,14 +1939,19 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
       id: Math.random().toString(36).slice(2),
       name: p.name, genre: p.genre, topic: p.topic, platform: p.platform,
       alloc: { ...p.alloc }, size: p.size, // blueprint for future sequels
-      trendy, reviews, engineName: eng ? eng.name : null, priceTier: p.price || "std",
+      trendy, reviews, engineName: eng ? eng.name : null, priceTier: p.price || "std", biz: biz ? biz.id : undefined,
       exclusive: p.exclusive ? platById(p.platform)?.holder || true : false,
       remake: !!p.remakeOf,
       score, salesTotal: 0, weeklyBase, weeksLeft, weeksTotal: weeksLeft,
       year: yearOf(prev.week),
       hue: ri(0, 360),
     };
-    if (p.live) { rec.live = true; rec.health = 100; rec.weeksLeft = 0; rec.weeksTotal = 1; }
+    if (p.mmo) {
+      rec.mmo = true; rec.live = true; rec.health = 100; rec.weeksLeft = 0; rec.weeksTotal = 1;
+      rec.subs = Math.round(weeklyBase * 3);
+      rec.subCap = Math.round(weeklyBase * 4.5);       // the world only holds so many players
+      rec.serverBase = Math.round(weeklyBase * 0.25);  // infrastructure sized at launch — a fixed bill for life
+    } else if (p.live) { rec.live = true; rec.health = 100; rec.weeksLeft = 0; rec.weeksTotal = 1; }
     // Remakes are judged against the legend, not the original
     let remakeLog = null;
     let remakeOutcome = null; // "triumph" | "solid" | "botched"
@@ -2044,7 +2104,8 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
     if (remakeLog) out.log = pushLog(out, remakeLog);
     if (mkt <= 0.85) out.log = pushLog(out, `🥵 The market is flooded with ${genreById(p.genre).name.toLowerCase()} / ${topicById(p.topic).name.toLowerCase()} games right now — sales take a ${Math.round((1 - mkt) * 100)}% haircut.`);
     if (mkt >= 1.05) out.log = pushLog(out, `🌱 Nobody's been making ${genreById(p.genre).name.toLowerCase()} games — starved buyers pay a premium.`);
-    if (rec.live) out.log = pushLog(out, `🌐 "${rec.name}" launched as a live-service game — weekly revenue as long as you keep it healthy.`);
+    if (rec.mmo) out.log = pushLog(out, `🌍 "${rec.name}" opened its servers to ${rec.subs.toLocaleString()} subscribers. The meter runs both ways — subscriptions in, server bills out.`);
+    else if (rec.live) out.log = pushLog(out, `🌐 "${rec.name}" launched as a live-service game — weekly revenue as long as you keep it healthy.`);
     if (pubLog) out.log = pushLog(out, pubLog);
     if (holderLog) out.log = pushLog(out, holderLog);
     return out;
@@ -2197,9 +2258,25 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
     if (!g || !g.live || g.sunset) return prev;
     return {
       ...prev,
-      released: prev.released.map(x => x.id === gameId ? { ...x, sunset: true, health: 0 } : x),
+      released: prev.released.map(x => x.id === gameId ? { ...x, sunset: true, health: 0, subs: 0 } : x),
       fans: prev.fans + 200,
       log: pushLog(prev, `🌐 "${g.name}" servers sunset with a farewell event. The community salutes.`),
+    };
+  });
+
+  const shipExpansion = gameId => update(prev => {
+    const g = prev.released.find(x => x.id === gameId);
+    if (!g || !g.mmo || g.sunset) return prev;
+    const cost = Math.round(Math.max(4000, (g.serverBase || 0) * 8));
+    if (prev.money < cost) return prev;
+    return {
+      ...prev,
+      money: prev.money - cost,
+      released: prev.released.map(x => x.id === gameId
+        ? { ...x, health: Math.min(100, (x.health ?? 0) + 45), subs: Math.min(x.subCap || Infinity, Math.round((x.subs || 0) * 1.35)), bleeding: false }
+        : x),
+      fans: prev.fans + ri(50, 150),
+      log: pushLog(prev, `📦 "${g.name}" expansion launched — lapsed subscribers are reinstalling.`),
     };
   });
 
@@ -2838,11 +2915,11 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
       </div>
 
       {s.tab === "studio"   && <StudioTab s={s} nextOffice={nextOffice} upgradeOffice={upgradeOffice} acceptContract={acceptContract} abandonContract={abandonContract} fundPitch={fundPitch} />}
-      {s.tab === "dev"      && <DevTab s={s} startProject={startProject} releaseGame={releaseGame} marketPush={marketPush} setPrice={setPrice} setLive={setLive} toggleCrunch={toggleCrunch} activePlatforms={activePlatforms} activeTopics={activeTopics} year={year} />}
+      {s.tab === "dev"      && <DevTab s={s} startProject={startProject} releaseGame={releaseGame} marketPush={marketPush} setPrice={setPrice} setBiz={setBiz} setLive={setLive} setMmo={setMmo} toggleCrunch={toggleCrunch} activePlatforms={activePlatforms} activeTopics={activeTopics} year={year} />}
       {s.tab === "team"     && <TeamTab s={s} hire={hire} fire={fire} office={office} recruitAd={recruitAd} recruitHeadhunter={recruitHeadhunter} poachRival={poachRival} toggleRest={toggleRest} setLead={setLead} assignTeam={assignTeam} />}
       {s.tab === "research" && <ResearchTab s={s} buyTech={buyTech} buyEngineTech={buyEngineTech} buildEngine={buildEngine} updateEngine={updateEngine} toggleEngineLicense={toggleEngineLicense} licenseRivalEngine={licenseRivalEngine} />}
       {s.tab === "ip"       && <IpTab s={s} sellIp={sellIp} buyIp={buyIp} renameIp={renameIp} buybackPubIp={buybackPubIp} openTalks={openTalks} orderSequel={orderSequel} injectCapital={injectCapital} absorbSubsidiary={absorbSubsidiary} sellSubsidiary={sellSubsidiary} />}
-      {s.tab === "shelf"    && <ShelfTab s={s} rerelease={rerelease} portGame={portGame} liveUpdate={liveUpdate} sunsetLive={sunsetLive} />}
+      {s.tab === "shelf"    && <ShelfTab s={s} rerelease={rerelease} portGame={portGame} liveUpdate={liveUpdate} sunsetLive={sunsetLive} shipExpansion={shipExpansion} />}
       {s.tab === "stats"    && <StatsTab s={s} />}
 
       {/* ACQUISITION TALKS */}
@@ -3266,7 +3343,7 @@ function Meter({ label, pct, color }) {
   );
 }
 
-function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setLive, toggleCrunch, activePlatforms, activeTopics, year }) {
+function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, setLive, setMmo, toggleCrunch, activePlatforms, activeTopics, year }) {
   const twoTeams = s.office >= 3;
   const [team, setTeam] = useState("A");
   const slot = team === "B" ? "projectB" : "project";
@@ -3347,20 +3424,44 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setLive, t
               🔬 Focus testers predict: <b style={{ color: band[1] >= 75 ? C.gold : band[1] >= 55 ? C.cyan : C.red, fontFamily: "'Bungee', cursive" }}>{band[0]}–{band[1]}</b> <span style={{ color: C.dim }}>/ 100</span>
             </div>
           )}
-          <div style={{ fontSize: 13, color: C.dim, letterSpacing: 1, margin: "4px 0 6px" }}>LAUNCH PRICE</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 12 }}>
-            {PRICE_TIERS.map(t => (
-              <button key={t.id} onClick={() => setPrice(team, t.id)} style={{
-                padding: "10px 8px", minHeight: 48, borderRadius: 12, cursor: "pointer",
-                border: `2px solid ${(p.price || "std") === t.id ? C.gold : C.line}`,
-                background: (p.price || "std") === t.id ? "#3A3110" : C.panelHi,
-                color: C.ink, fontFamily: "'Rubik', sans-serif", fontSize: 14, fontWeight: 700, touchAction: "manipulation",
-              }}>
-                {t.name}
-                <div style={{ fontSize: 10, color: C.dim, fontWeight: 400, marginTop: 2 }}>{t.blurb}</div>
-              </button>
-            ))}
-          </div>
+          {p.platform === "mobile" ? (
+            <>
+              <div style={{ fontSize: 13, color: C.dim, letterSpacing: 1, margin: "4px 0 6px" }}>BUSINESS MODEL</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 12 }}>
+                {BIZ_MODELS.map(b => (
+                  <button key={b.id} onClick={() => setBiz(team, b.id)} style={{
+                    padding: "10px 8px", minHeight: 48, borderRadius: 12, cursor: "pointer",
+                    border: `2px solid ${(p.biz || "premium") === b.id ? C.gold : C.line}`,
+                    background: (p.biz || "premium") === b.id ? "#3A3110" : C.panelHi,
+                    color: C.ink, fontFamily: "'Rubik', sans-serif", fontSize: 14, fontWeight: 700, touchAction: "manipulation",
+                  }}>
+                    {b.name}
+                    <div style={{ fontSize: 10, color: C.dim, fontWeight: 400, marginTop: 2 }}>{b.blurb}</div>
+                  </button>
+                ))}
+              </div>
+              <div style={{ fontSize: 12, color: C.dim, marginBottom: 12 }}>
+                📱 Brutal discoverability: mobile sales lean hard on your fanbase and hype — market this one or watch it drown.
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: 13, color: C.dim, letterSpacing: 1, margin: "4px 0 6px" }}>LAUNCH PRICE</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 12 }}>
+                {PRICE_TIERS.map(t => (
+                  <button key={t.id} onClick={() => setPrice(team, t.id)} style={{
+                    padding: "10px 8px", minHeight: 48, borderRadius: 12, cursor: "pointer",
+                    border: `2px solid ${(p.price || "std") === t.id ? C.gold : C.line}`,
+                    background: (p.price || "std") === t.id ? "#3A3110" : C.panelHi,
+                    color: C.ink, fontFamily: "'Rubik', sans-serif", fontSize: 14, fontWeight: 700, touchAction: "manipulation",
+                  }}>
+                    {t.name}
+                    <div style={{ fontSize: 10, color: C.dim, fontWeight: 400, marginTop: 2 }}>{t.blurb}</div>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
           {year >= 2010 && (s.engineTechs || []).includes("net3") && (
             <button onClick={() => setLive(team, !p.live)} style={{
               width: "100%", marginBottom: 12, padding: "10px 12px", minHeight: 48, borderRadius: 12, cursor: "pointer",
@@ -3371,8 +3472,18 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setLive, t
               <div style={{ fontSize: 11, color: C.dim, fontWeight: 400, marginTop: 2 }}>No sales tail; weekly revenue while the game stays healthy. Push updates to keep it alive.</div>
             </button>
           )}
+          {year >= 1996 && (s.engineTechs || []).includes("net2") && (p.size === "L" || p.size === "AAA") && (
+            <button onClick={() => setMmo(team, !p.mmo)} style={{
+              width: "100%", marginBottom: 12, padding: "10px 12px", minHeight: 48, borderRadius: 12, cursor: "pointer",
+              border: `2px solid ${p.mmo ? C.mag : C.line}`, background: p.mmo ? "#3A2050" : C.panelHi,
+              color: C.ink, fontFamily: "'Rubik', sans-serif", fontSize: 14, fontWeight: 700, textAlign: "left", touchAction: "manipulation",
+            }}>
+              🌍 Launch as MMO {p.mmo ? "— ON" : "— OFF"}
+              <div style={{ fontSize: 11, color: C.dim, fontWeight: 400, marginTop: 2 }}>Subscription revenue from a persistent world — but the server bill never sleeps. Expansions bring lapsed players home; a dying MMO bleeds money until you sunset it.</div>
+            </button>
+          )}
           <Btn color={C.green} disabled={!canRelease} onClick={() => releaseGame(team)} style={{ width: "100%" }}>
-            {canRelease ? (p.live ? "🌐 Launch the service" : "🚀 Release the game") : "Finish development first"}
+            {canRelease ? (p.mmo ? "🌍 Open the servers" : p.live ? "🌐 Launch the service" : "🚀 Release the game") : "Finish development first"}
           </Btn>
           {canRelease && p.bugs > 5 && (
             <div style={{ marginTop: 12, fontSize: 14, color: C.red }}>
@@ -4402,7 +4513,7 @@ function StatsTab({ s }) {
   );
 }
 
-function ShelfTab({ s, rerelease, portGame, liveUpdate, sunsetLive }) {
+function ShelfTab({ s, rerelease, portGame, liveUpdate, sunsetLive, shipExpansion }) {
   const yr = yearOf(s.week);
   const rrCost = Math.round(2000 * (1 + (yr - 1984) * 0.05));
   const luCost = Math.round(3000 * (1 + Math.max(0, yr - 2010) * 0.05));
@@ -4443,8 +4554,8 @@ function ShelfTab({ s, rerelease, portGame, liveUpdate, sunsetLive }) {
                   </div>
                 )}
                 {g.live && (
-                  <div style={{ background: g.sunset ? "#555" : C.cyan, color: "#1A1633", fontSize: 11, fontWeight: 800, padding: "3px 8px", borderRadius: 8, letterSpacing: 0.5 }}>
-                    🌐 {g.sunset ? "SUNSET" : "LIVE"}
+                  <div style={{ background: g.sunset ? "#555" : g.mmo && g.bleeding ? C.red : C.cyan, color: "#1A1633", fontSize: 11, fontWeight: 800, padding: "3px 8px", borderRadius: 8, letterSpacing: 0.5 }}>
+                    {g.mmo ? `🌍 ${g.sunset ? "SUNSET" : "MMO"}` : `🌐 ${g.sunset ? "SUNSET" : "LIVE"}`}
                   </div>
                 )}
               </div>
@@ -4456,6 +4567,11 @@ function ShelfTab({ s, rerelease, portGame, liveUpdate, sunsetLive }) {
               <div>
                 {g.live && !g.sunset && (
                   <div style={{ marginBottom: 8 }}>
+                    {g.mmo && (
+                      <div style={{ fontSize: 11, fontWeight: 800, color: g.bleeding ? C.red : "#fff", textShadow: "1px 1px 0 #0006", marginBottom: 4 }}>
+                        👥 {(g.subs || 0).toLocaleString()} subs{g.bleeding ? " · LOSING MONEY" : ""}
+                      </div>
+                    )}
                     <div style={{ height: 6, borderRadius: 3, background: "#0006", overflow: "hidden", marginBottom: 4 }}>
                       <div style={{ width: `${Math.round(g.health ?? 0)}%`, height: "100%", background: (g.health ?? 0) < 30 ? C.red : (g.health ?? 0) < 60 ? C.gold : C.green }} />
                     </div>
@@ -4467,6 +4583,14 @@ function ShelfTab({ s, rerelease, portGame, liveUpdate, sunsetLive }) {
                         Sunset
                       </button>
                     </div>
+                    {g.mmo && (() => {
+                      const exCost = Math.round(Math.max(4000, (g.serverBase || 0) * 8));
+                      return (
+                        <button onClick={e => { e.stopPropagation(); shipExpansion(g.id); }} disabled={s.money < exCost} style={{ width: "100%", marginTop: 6, padding: "6px 4px", minHeight: 36, borderRadius: 8, border: "none", cursor: "pointer", background: "#1A1633cc", color: s.money < exCost ? C.dim : "#fff", fontSize: 11, fontWeight: 800, fontFamily: "'Rubik', sans-serif", touchAction: "manipulation" }}>
+                          📦 Expansion {money$(exCost)} · +45 health · +35% subs
+                        </button>
+                      );
+                    })()}
                   </div>
                 )}
                 {!g.live && !g.rereleased && g.weeksLeft <= 0 && g.score >= 70 && yr - g.year >= 2 && (
@@ -4515,12 +4639,15 @@ function ShelfTab({ s, rerelease, portGame, liveUpdate, sunsetLive }) {
                 {g.pubName && <Tag>📮 {g.pubName}</Tag>}
                 {g.port && <Tag>🔀 Port</Tag>}
                 {g.exclusive && <Tag>🤝 Exclusive</Tag>}
-                <Tag>{(PRICE_TIERS.find(t => t.id === g.priceTier)?.name || "Standard")} price</Tag>
+                {g.biz
+                  ? <Tag>📱 {BIZ_MODELS.find(b => b.id === g.biz)?.name || "Premium"}</Tag>
+                  : <Tag>{(PRICE_TIERS.find(t => t.id === g.priceTier)?.name || "Standard")} price</Tag>}
                 {g.goty && <Tag gold>🏆 GOTY</Tag>}
                 {g.trendy && <Tag>📈 Trend launch</Tag>}
                 {g.remake && <Tag>{g.remakeMode === "remaster" ? "✨ Remaster" : "♻ Remake"}</Tag>}
                 {g.rereleased && <Tag>💿 Greatest Hits</Tag>}
-                {g.live && <Tag>🌐 {g.sunset ? "Sunset" : `Live · ${Math.round(g.health ?? 0)}% health`}</Tag>}
+                {g.live && !g.mmo && <Tag>🌐 {g.sunset ? "Sunset" : `Live · ${Math.round(g.health ?? 0)}% health`}</Tag>}
+                {g.mmo && <Tag>🌍 {g.sunset ? "MMO · Sunset" : `MMO · ${(g.subs || 0).toLocaleString()} subs · ${Math.round(g.health ?? 0)}% health`}</Tag>}
               </div>
               <Row k="Lifetime revenue" v={money$(g.salesTotal)} color={C.green} />
               {!g.port && !g.live && !g.exclusive && (() => {
