@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend, Cell } from "recharts";
 
 /* ============================================================
@@ -453,6 +453,67 @@ const EXP_LABELS = {
 const ysAdd = (ys, kind, key, amt) => !ys || !amt ? ys
   : { ...ys, [kind]: { ...(ys[kind] || {}), [key]: ((ys[kind] || {})[key] || 0) + amt } };
 
+// ---------- AMBIENT MUSIC ----------
+// Four looping tracks in public/music (see scripts/generate-music.mjs), one
+// per era of the timeline. Playback runs through Web Audio so loops are
+// seamless and era changes crossfade.
+const MUSIC_TRACKS = [
+  { id: "chip-dreams",    from: 1984, name: "Chip Dreams" },
+  { id: "neon-grid",      from: 1995, name: "Neon Grid" },
+  { id: "polygon-sunset", from: 2006, name: "Polygon Sunset" },
+  { id: "cloud-save",     from: 2016, name: "Cloud Save" },
+];
+const trackForYear = y => [...MUSIC_TRACKS].reverse().find(t => y >= t.from) || MUSIC_TRACKS[0];
+
+const music = {
+  ctx: null, master: null, live: null, current: null, buffers: {}, loading: null,
+  async play(id) {
+    if (this.current === id) {
+      if (this.ctx?.state === "suspended") this.ctx.resume().catch(() => {});
+      return;
+    }
+    if (this.loading === id) return;
+    try {
+      if (!this.ctx) {
+        this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        this.master = this.ctx.createGain();
+        this.master.gain.value = 0.35;
+        this.master.connect(this.ctx.destination);
+      }
+      if (this.ctx.state === "suspended") await this.ctx.resume().catch(() => {});
+      let buf = this.buffers[id];
+      if (!buf) {
+        this.loading = id;
+        const res = await fetch(`${import.meta.env.BASE_URL}music/${id}.mp3`);
+        buf = this.buffers[id] = await this.ctx.decodeAudioData(await res.arrayBuffer());
+        this.loading = null;
+      }
+      this.stop(1.2);
+      const src = this.ctx.createBufferSource();
+      src.buffer = buf;
+      src.loop = true;
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.0001, this.ctx.currentTime);
+      g.gain.linearRampToValueAtTime(1, this.ctx.currentTime + 1.5);
+      src.connect(g);
+      g.connect(this.master);
+      src.start();
+      this.live = { src, g };
+      this.current = id;
+    } catch { this.loading = null; } // no audio available — stay silent
+  },
+  stop(fade = 0.6) {
+    if (!this.live || !this.ctx) return;
+    const { src, g } = this.live;
+    try {
+      g.gain.setTargetAtTime(0, this.ctx.currentTime, fade / 4);
+      src.stop(this.ctx.currentTime + fade);
+    } catch {}
+    this.live = null;
+    this.current = null;
+  },
+};
+
 function pushLog(s, msg) {
   return [{ wk: s.week, msg }, ...s.log].slice(0, 40);
 }
@@ -487,7 +548,7 @@ function freshState(studioName, founder) {
     bidWar: null,
     loan: null, loanUsed: false, bankOffer: null,
     acqTalks: null, acqWar: null, buyoutOffer: null, soldOut: null,
-    publishers: Object.fromEntries(PUBLISHERS.map(p => [p, { rel: 50 }])),
+    publishers: Object.fromEntries(PUBLISHERS.map(p => [p.name, { rel: 50 }])),
     pubIps: [],          // your franchises a publisher kept the rights to
     pitches: [],         // indie pitch board (once you're a label)
     nextPitchWeek: 0,
@@ -723,7 +784,7 @@ async function loadGame() {
       s.log = pushLog(s, "🎮 The industry's history books have been rewritten — your catalog now lives on the real console timeline.");
     }
     if (!s.publishers) {
-      s.publishers = Object.fromEntries(PUBLISHERS.map(p => [p, { rel: 50 }]));
+      s.publishers = Object.fromEntries(PUBLISHERS.map(p => [p.name, { rel: 50 }]));
       s.pubIps = []; s.pitches = []; s.nextPitchWeek = s.week; s.pubProjects = [];
     }
     if (!s.leadId) s.leadId = s.staff[0]?.id || null;
@@ -739,6 +800,7 @@ async function loadGame() {
         s[k] = { ...p, maxWeekly: p.totalWeeks / sz.minWeeks, vision: 0, crunch: false };
       }
     }
+    if (s.publishers) for (const p of PUBLISHERS) if (!s.publishers[p.name]) s.publishers[p.name] = { rel: 50 };
     if (!s.yearStats) s.yearStats = { revenue: 0, lastRevenue: 0, fansStart: s.fans, repStart: s.rep ?? 50, topRival: null };
     if (s.yearReview === undefined) s.yearReview = null;
     if (s.yearStats.cashStart === undefined) s.yearStats = { ...s.yearStats, cashStart: s.money, rev: {}, exp: {} };
@@ -1076,15 +1138,31 @@ function simulateRivals(s, year) {
 
 // ---------- CONTRACTS ----------
 
-const PUBLISHERS = ["Meridian Publishing", "Starcade Media", "Vantage Bros.", "Crescent Co."];
+// Publishers are distribution, nothing more: no advances. Strength is reach —
+// the fan floor their logo puts a game in front of — and stronger houses take
+// a deeper cut. They approach YOU when a game is ready to ship, and only if
+// it meets their criteria: genres they publish and the score bar their own
+// playtest of the finished build has to clear. Some enter or fold with time.
+//   share: the cut YOU keep · reach/reachRel: fan floor their logo buys
+//   minScore: their playtest bar · genres: what they publish (null = anything)
+const PUBLISHERS = [
+  { name: "Crescent Co.",          tier: "Boutique",     from: 1984,              share: 0.50, reach: 8000,  reachRel: 60,  minScore: 0,  minRep: 0,  genres: null },
+  { name: "Starcade Media",        tier: "Mid-size",     from: 1984, until: 2003, share: 0.35, reach: 18000, reachRel: 100, minScore: 50, minRep: 30, genres: ["action", "platformer", "shooter", "racing"] },
+  { name: "Meridian Publishing",   tier: "Mid-size",     from: 1984,              share: 0.35, reach: 18000, reachRel: 100, minScore: 50, minRep: 35, genres: ["rpg", "adventure", "strategy", "sim"] },
+  { name: "Vantage Bros.",         tier: "Major",        from: 1984,              share: 0.30, reach: 40000, reachRel: 180, minScore: 62, minRep: 50, genres: null },
+  { name: "Titanwave Interactive", tier: "Global giant", from: 1996,              share: 0.25, reach: 85000, reachRel: 300, minScore: 75, minRep: 65, genres: null },
+  { name: "Sprout Label",          tier: "Boutique",     from: 2005,              share: 0.55, reach: 12000, reachRel: 80,  minScore: 0,  minRep: 0,  genres: null },
+  { name: "Pocketworks",           tier: "Mid-size",     from: 2009,              share: 0.35, reach: 30000, reachRel: 140, minScore: 45, minRep: 25, genres: ["puzzle", "sim", "sports", "racing"] },
+];
+const pubByName = n => PUBLISHERS.find(p => p.name === n);
+const pubActive = (p, year) => year >= p.from && year <= (p.until || 9999);
 
-// Publisher reach: the fan floor their logo on the box buys you
-const pubReach = rel => 18000 + rel * 100;
-
-// Deal terms scale with your relationship
-function pubDealTerms(pub, rel, devCost, keepIp) {
-  const advance = Math.round(devCost * (0.8 + rel / 200) * (keepIp ? 0.5 : 1));
-  return { name: pub, advance, share: 0.35, floor: pubReach(rel), ipRights: keepIp };
+// A deal is reach for a cut. Keeping the IP costs a deeper cut instead of
+// (the now-abolished) half advance.
+function pubDealTerms(pubObj, rel, keepIp) {
+  const floor = pubObj.reach + Math.round(rel * pubObj.reachRel);
+  const share = keepIp ? pubObj.share * 0.7 : pubObj.share;
+  return { name: pubObj.name, share, floor, ipRights: keepIp };
 }
 
 const INDIE_NAMES = ["Moonlight Attic", "Cardboard Rocket", "Two Brothers Basement", "Neon Possum", "Static Cling Games", "Paper Lantern", "Rust Belt Studio", "Midnight Waffle", "Glass Cannon Collective", "Tumbleweed Digital", "Fern & Pixel", "Broke Compass"];
@@ -1115,7 +1193,7 @@ const CONTRACT_TIERS = [
 function makeContract(year, rivalNames) {
   const t = pick(CONTRACT_TIERS);
   const infl = 1 + (year - 1984) * 0.07;
-  const client = Math.random() < 0.5 && rivalNames.length ? pick(rivalNames) : pick(PUBLISHERS);
+  const client = Math.random() < 0.5 && rivalNames.length ? pick(rivalNames) : pick(PUBLISHERS.filter(p => pubActive(p, year))).name;
   return {
     id: Math.random().toString(36).slice(2),
     client, job: pick(CONTRACT_JOBS), tier: t.tier,
@@ -1612,7 +1690,7 @@ function tick(prev) {
   if (s.week % 52 === 30 || (!s.engineMarket?.length && s.week % 13 === 0)) {
     const sellers = independentRivals(s).filter(r => r.arch === "tech" || r.arch === "blockbuster");
     const offer = () => {
-      const seller = sellers.length ? pick(sellers) : { name: pick(PUBLISHERS), id: null, arch: "tech" };
+      const seller = sellers.length ? pick(sellers) : { name: pick(PUBLISHERS).name, id: null, arch: "tech" };
       const power = Math.round(era * rnd(0.85, 1.2) * (seller.arch === "tech" ? 1.15 : 1));
       return {
         id: Math.random().toString(36).slice(2),
@@ -1710,6 +1788,10 @@ function tick(prev) {
     const fresh = TOPICS.filter(t => t.yr === year);
     if (fresh.length) {
       s.log = pushLog(s, `💡 New trends for ${year}: ${fresh.map(t => t.name).join(", ")} ${fresh.length > 1 ? "are" : "is"} now on the greenlight board.`);
+    }
+    for (const pb of PUBLISHERS) {
+      if (pb.from === year) s.log = pushLog(s, `📮 ${pb.name} opens for business — a ${pb.tier.toLowerCase()} publisher is signing studios.`);
+      if (pb.until && pb.until === year - 1) s.log = pushLog(s, `📮 ${pb.name} has shut its doors. An era ends — their deals die with them.`);
     }
     const prevYear = year - 1;
     const ys = s.yearStats || { revenue: 0, fansStart: 0, repStart: 50, topRival: null, lastRevenue: 0 };
@@ -1870,7 +1952,22 @@ export default function PixelEmpire() {
   const [mode, setMode] = useState("boot");   // boot | title | setup | play
   const [setup, setSetup] = useState({ studio: "", founder: "" });
   const [launchCard, setLaunchCard] = useState(null); // release results modal
+  const [musicOn, setMusicOn] = useState(() => {
+    try { return localStorage.getItem("pe-music") !== "off"; } catch { return true; }
+  });
   const saveTimer = useRef(null);
+
+  // Ambient music follows the in-game era; autoplay policies mean the first
+  // note may wait for the first tap, so a one-shot gesture listener retries.
+  const musicTrackId = trackForYear(s ? yearOf(s.week) : 1984).id;
+  useEffect(() => {
+    try { localStorage.setItem("pe-music", musicOn ? "on" : "off"); } catch {}
+    if (!musicOn) { music.stop(); return; }
+    const kick = () => music.play(musicTrackId);
+    kick();
+    window.addEventListener("pointerdown", kick, { once: true });
+    return () => window.removeEventListener("pointerdown", kick);
+  }, [musicOn, musicTrackId]);
 
   // Boot: check for save
   useEffect(() => {
@@ -1964,7 +2061,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
         };
       })(),
       log: pushLog(prev, draft.pubDeal
-        ? `Development begins on "${draft.name}" — published by ${draft.pubDeal.name}. Advance: ${money$(draft.pubDeal.advance)}. They keep 65% of revenue${draft.pubDeal.ipRights ? "" : " — and the IP, if this becomes one"}.`
+        ? `Development begins on "${draft.name}" — published by ${draft.pubDeal.name}. Advance: ${money$(draft.pubDeal.advance)}. They keep ${100 - Math.round(draft.pubDeal.share * 100)}% of revenue${draft.pubDeal.ipRights ? "" : " — and the IP, if this becomes one"}.`
         : draft.remakeOf
         ? `Development begins on "${draft.name}" — a remake of the ${draft.remakeOf.year} classic, for ${plat.name}. Nostalgia is a double-edged sword.`
         : draft.ip
@@ -2012,10 +2109,13 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
     };
   });
 
-  const releaseGame = (team = "A") => update(prev => {
+  const releaseGame = (team = "A", launchDeal = null) => update(prev => {
     const slot = slotOf(team);
-    const p = prev[slot];
-    if (!p) return prev;
+    const p0 = prev[slot];
+    if (!p0) return prev;
+    // Publishers sign the finished game at launch. Older saves may still carry
+    // a deal signed at greenlight on the project itself — honor it.
+    const p = launchDeal ? { ...p0, pubDeal: launchDeal } : p0;
     const score = computeScore(prev, p);
     // A publisher's logo on the box is distribution: sales calculate as if you
     // had at least their reach in fans — but they keep 65% of revenue.
@@ -2165,11 +2265,12 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
     if (p.pubDeal) {
       rec.pubName = p.pubDeal.name;
       const rel0 = publishers?.[p.pubDeal.name]?.rel ?? 50;
+      const guar = p.pubDeal.guarantee || 0; // only legacy greenlight deals carry a clawback clause
       let relD;
-      if (score < 55) {
+      if (guar && score < guar && p.pubDeal.advance) {
         clawback = Math.round(p.pubDeal.advance * 0.5);
         relD = -20;
-        pubLog = `📮 "${rec.name}" missed ${p.pubDeal.name}'s score guarantee (${score} < 55). They clawed back ${money$(clawback)} of the advance — and they're furious.`;
+        pubLog = `📮 "${rec.name}" missed ${p.pubDeal.name}'s score guarantee (${score} < ${guar}). They clawed back ${money$(clawback)} of the advance — and they're furious.`;
       } else if (score >= 75) {
         relD = 10;
         pubLog = `📮 ${p.pubDeal.name} is thrilled with "${rec.name}" — expect a better advance next time.`;
@@ -2214,6 +2315,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
     if (remakeLog) out.log = pushLog(out, remakeLog);
     if (mkt <= 0.85) out.log = pushLog(out, `🥵 The market is flooded with ${genreById(p.genre).name.toLowerCase()} / ${topicById(p.topic).name.toLowerCase()} games right now — sales take a ${Math.round((1 - mkt) * 100)}% haircut.`);
     if (mkt >= 1.05) out.log = pushLog(out, `🌱 Nobody's been making ${genreById(p.genre).name.toLowerCase()} games — starved buyers pay a premium.`);
+    if (launchDeal) out.log = pushLog(out, `📮 ${launchDeal.name} is publishing "${rec.name}" — their logo puts it in front of ~${Math.round(launchDeal.floor / 1000)}K fans; they keep ${100 - Math.round(launchDeal.share * 100)}% of revenue${launchDeal.ipRights ? "" : " and the IP, if this becomes one"}.`);
     if (rec.mmo) out.log = pushLog(out, `🌍 "${rec.name}" opened its servers to ${rec.subs.toLocaleString()} subscribers. The meter runs both ways — subscriptions in, server bills out.`);
     else if (rec.live) out.log = pushLog(out, `🌐 "${rec.name}" launched as a live-service game — weekly revenue as long as you keep it healthy.`);
     if (pubLog) out.log = pushLog(out, pubLog);
@@ -2908,6 +3010,13 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
             <div key={i} style={{ width: 46, height: 62, borderRadius: 6, background: c, opacity: .85, transform: `rotate(${(i - 1.5) * 4}deg)` }} />
           ))}
         </div>
+        <button onClick={() => setMusicOn(v => !v)} style={{
+          marginTop: 28, padding: "10px 18px", borderRadius: 12, cursor: "pointer", fontSize: 15, fontWeight: 700,
+          border: `2px solid ${C.line}`, background: "transparent", color: C.dim,
+          fontFamily: "'Rubik', sans-serif", touchAction: "manipulation",
+        }}>
+          {musicOn ? "🔊 Music on" : "🔇 Music off"}
+        </button>
       </div>
     );
   }
@@ -3023,7 +3132,16 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
           <Stat label="Research" value={Math.floor(s.rp)} color={C.gold} />
           <Stat label="Weekly cost" value={money$(weeklyCost)} color={C.dim} />
         </div>
-        <Btn color={C.green} onClick={nextWeek}>▶ Next Week</Btn>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button onClick={() => setMusicOn(v => !v)} title={musicOn ? `Music: ${trackForYear(year).name} — tap to mute` : "Music off — tap to play"} style={{
+            width: 44, height: 44, borderRadius: 12, cursor: "pointer", fontSize: 19,
+            border: `2px solid ${C.line}`, background: musicOn ? C.panelHi : "transparent",
+            color: musicOn ? C.ink : C.dim, touchAction: "manipulation",
+          }}>
+            {musicOn ? "🔊" : "🔇"}
+          </button>
+          <Btn color={C.green} onClick={nextWeek}>▶ Next Week</Btn>
+        </div>
       </div>
 
       {warnings.length > 0 && (
@@ -3519,14 +3637,24 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, se
     remakeOf: null, // { id, name, score, year }
     exclusive: false,
   }));
-  const [pub, setPub] = useState(null); // { name, keepIp } — null = self-publish
-  const [topicCat, setTopicCat] = useState(null); // null = all categories
-  const [topicQ, setTopicQ] = useState("");       // search filter
+  const [launchPub, setLaunchPub] = useState(null); // { name, keepIp } — publisher signing the FINISHED game; null = self-publish
+  const [topicPicker, setTopicPicker] = useState(false); // full topic list modal
+
+  // Every publisher's testers play the finished build; one shared estimate
+  // (stable within a week, re-rolled as polish continues) decides who knocks.
+  const pubEst = useMemo(() => {
+    const pp = s[slot];
+    if (!pp || pp.stage !== "polish") return null;
+    let sum = 0;
+    for (let i = 0; i < 7; i++) sum += computeScore(s, pp);
+    return Math.round(sum / 7);
+  }, [s, slot]);
 
   // When a project wraps, clear the drafting table for the next pitch
   useEffect(() => {
     if (!curProj) setDraft(v => ({ ...v, ip: null, remakeOf: null, name: "" }));
-  }, [curProj]);
+    setLaunchPub(null);
+  }, [curProj, team]);
 
   const teamBar = twoTeams ? (
     <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
@@ -3553,6 +3681,21 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, se
       const est = Math.round(sum / 7);
       band = [Math.max(5, est - 5), Math.min(98, est + 5)];
     }
+    // Publishers approach YOU over the finished build. Their own playtest
+    // (pubEst) has to clear their score bar, the genre has to be one they
+    // publish, and they remember how past deals went. What they bring is
+    // reach; what they take is a cut.
+    const offers = canRelease ? PUBLISHERS.filter(pb => pubActive(pb, year)).map(pb => {
+      const rel = s.publishers?.[pb.name]?.rel ?? 50;
+      const terms = pubDealTerms(pb, rel, launchPub?.name === pb.name ? launchPub.keepIp : false);
+      const reason = rel < 25 ? "Won't work with you after last time."
+        : (s.rep ?? 50) < pb.minRep ? `Wants a proven studio — reputation ${pb.minRep}+ (yours: ${Math.round(s.rep ?? 50)}).`
+        : pb.genres && !pb.genres.includes(p.genre) ? `Doesn't publish ${genreById(p.genre).name.toLowerCase()} games.`
+        : pubEst != null && pubEst < pb.minScore ? `Played the build and passed — they only ship ${pb.minScore}+ material.`
+        : null;
+      return { pb, rel, terms, reason };
+    }).sort((a, b) => (a.reason ? 1 : 0) - (b.reason ? 1 : 0) || b.terms.floor - a.terms.floor) : [];
+    const chosenOffer = launchPub ? offers.find(o => o.pb.name === launchPub.name && !o.reason) : null;
     return (
       <>
       {teamBar}
@@ -3646,8 +3789,55 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, se
               <div style={{ fontSize: 11, color: C.dim, fontWeight: 400, marginTop: 2 }}>Subscription revenue from a persistent world — but the server bill never sleeps. Expansions bring lapsed players home; a dying MMO bleeds money until you sunset it.</div>
             </button>
           )}
-          <Btn color={C.green} disabled={!canRelease} onClick={() => releaseGame(team)} style={{ width: "100%" }}>
-            {canRelease ? (p.mmo ? "🌍 Open the servers" : p.live ? "🌐 Launch the service" : "🚀 Release the game") : "Finish development first"}
+          {canRelease && (
+            <>
+              <div style={{ fontSize: 13, color: C.dim, letterSpacing: 1, margin: "4px 0 6px" }}>PUBLISHING — WHO'S AT THE DOOR</div>
+              {!offers.some(o => !o.reason) && (
+                <div style={{ fontSize: 13, color: C.dim, marginBottom: 8 }}>
+                  No publisher wants this one. Self-publishing it is.
+                </div>
+              )}
+              <div style={{ display: "grid", gap: 6, marginBottom: 10 }}>
+                <button onClick={() => setLaunchPub(null)} style={{
+                  padding: "10px 12px", minHeight: 48, borderRadius: 12, cursor: "pointer", textAlign: "left",
+                  border: `2px solid ${!launchPub ? C.green : C.line}`, background: !launchPub ? "#123A28" : C.panelHi,
+                  color: C.ink, fontFamily: "'Rubik', sans-serif", fontSize: 14, fontWeight: 700, touchAction: "manipulation",
+                }}>
+                  ✊ Self-publish
+                  <div style={{ fontSize: 11, color: C.dim, fontWeight: 400, marginTop: 2 }}>Keep 100% of revenue and the IP. Sales lean entirely on your {s.fans.toLocaleString()} fans.</div>
+                </button>
+                {offers.map(({ pb, rel, terms, reason }) => {
+                  const sel = launchPub?.name === pb.name;
+                  return (
+                    <button key={pb.name} disabled={!!reason} onClick={() => setLaunchPub(v => v?.name === pb.name ? v : { name: pb.name, keepIp: false })} style={{
+                      padding: "10px 12px", minHeight: 48, borderRadius: 12, cursor: reason ? "default" : "pointer", textAlign: "left",
+                      border: `2px solid ${sel ? C.green : C.line}`, background: sel ? "#123A28" : C.panelHi,
+                      color: C.ink, fontFamily: "'Rubik', sans-serif", fontSize: 14, fontWeight: 700, touchAction: "manipulation", opacity: reason ? 0.5 : 1,
+                    }}>
+                      📮 {pb.name} <span style={{ fontSize: 11, color: C.cyan }}>{pb.tier}</span> <span style={{ fontSize: 11, color: rel >= 65 ? C.gold : rel >= 40 ? C.dim : C.red }}>rel {Math.round(rel)}</span>
+                      <div style={{ fontSize: 11, color: C.dim, fontWeight: 400, marginTop: 2 }}>
+                        {reason || `Puts it in front of ~${Math.round(terms.floor / 1000)}K fans · you keep ${Math.round(terms.share * 100)}% of revenue`}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+              {chosenOffer && (
+                <button onClick={() => setLaunchPub(v => ({ ...v, keepIp: !v.keepIp }))} style={{
+                  width: "100%", marginBottom: 10, padding: "10px 12px", minHeight: 48, borderRadius: 12, cursor: "pointer", textAlign: "left",
+                  border: `2px solid ${launchPub.keepIp ? C.gold : C.line}`, background: launchPub.keepIp ? "#3A3110" : C.panelHi,
+                  color: C.ink, fontFamily: "'Rubik', sans-serif", fontSize: 14, fontWeight: 700, touchAction: "manipulation",
+                }}>
+                  📜 Keep the IP rights {launchPub.keepIp ? `— YES (deeper cut: you keep ${Math.round(chosenOffer.terms.share * 100)}%)` : "— NO (they own the franchise)"}
+                  <div style={{ fontSize: 11, color: C.dim, fontWeight: 400, marginTop: 2 }}>
+                    If this game becomes a franchise, whoever holds the rights owns it. Keeping your name on the deed costs a deeper revenue cut.
+                  </div>
+                </button>
+              )}
+            </>
+          )}
+          <Btn color={C.green} disabled={!canRelease} onClick={() => releaseGame(team, chosenOffer ? chosenOffer.terms : null)} style={{ width: "100%" }}>
+            {canRelease ? (chosenOffer ? `📮 Release via ${chosenOffer.pb.name}` : p.mmo ? "🌍 Open the servers" : p.live ? "🌐 Launch the service" : "🚀 Release the game") : "Finish development first"}
           </Btn>
           {canRelease && p.bugs > 5 && (
             <div style={{ marginTop: 12, fontSize: 14, color: C.red }}>
@@ -3834,42 +4024,47 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, se
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
           {GENRES.map(gg => chip(draft.genre === gg.id, () => setDraft(v => ({ ...v, genre: gg.id })), gg.name))}
         </div>
-        <div style={{ fontSize: 13, color: C.dim, margin: "14px 0 6px", letterSpacing: 1 }}>
-          TOPIC — <b style={{ color: C.ink }}>{t?.name || draft.topic}</b> <span style={{ color: C.dim }}>· {activeTopics.length} available</span>
+        <div style={{ fontSize: 13, color: C.dim, margin: "14px 0 6px", letterSpacing: 1 }}>TOPIC</div>
+        <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
+          <div style={{
+            flex: 1, padding: "12px 14px", borderRadius: 12, border: `2px solid ${C.mag}`, background: "#3A2050",
+            color: C.ink, fontSize: 15, fontWeight: 600, display: "flex", alignItems: "center", gap: 8,
+          }}>
+            {t?.great.includes(draft.genre) ? "🔥" : t?.bad.includes(draft.genre) ? "🧊" : "•"} {t?.name || draft.topic}
+          </div>
+          <Btn small kind="ghost" color={C.cyan} onClick={() => setTopicPicker(true)}>
+            📚 Topics ({activeTopics.length})
+          </Btn>
         </div>
-        {(() => {
-          // Scales past 80 topics: filter by category and search instead of
-          // one pill per topic. Great fits for the chosen genre sort first.
-          const q = topicQ.trim().toLowerCase();
-          const cats = TOPIC_CATS.filter(([id]) => activeTopics.some(tt => tt.cat === id));
-          const rank = tt => (tt.great.includes(draft.genre) ? 0 : tt.bad.includes(draft.genre) ? 2 : 1);
-          const visible = activeTopics
-            .filter(tt => (!topicCat || tt.cat === topicCat) && (!q || tt.name.toLowerCase().includes(q)))
-            .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
-          const catBtn = (id, label) => (
-            <button key={label} onClick={() => setTopicCat(id)} style={{
-              padding: "7px 12px", minHeight: 36, borderRadius: 10, cursor: "pointer", whiteSpace: "nowrap",
-              border: `2px solid ${topicCat === id ? C.cyan : C.line}`, background: topicCat === id ? "#123A3E" : C.panelHi,
-              color: C.ink, fontFamily: "'Rubik', sans-serif", fontSize: 13, fontWeight: 700, touchAction: "manipulation",
-            }}>{label}</button>
-          );
-          return (
-            <>
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
-                {catBtn(null, "All")}
-                {cats.map(([id, label]) => catBtn(id, label))}
+        {topicPicker && (
+          <div onClick={() => setTopicPicker(false)} style={{ position: "fixed", inset: 0, background: "#000a", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 30, padding: 16 }}>
+            <div onClick={e => e.stopPropagation()} style={{ background: C.panel, border: `2px solid ${C.cyan}`, borderRadius: 22, padding: 20, maxWidth: 720, width: "100%", maxHeight: "88vh", overflowY: "auto", animation: "popIn .2s ease-out" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                <div style={{ fontFamily: "'Bungee', cursive", fontSize: 18, color: C.cyan }}>TOPICS · {year}</div>
+                <Btn small kind="ghost" onClick={() => setTopicPicker(false)}>✕ Close</Btn>
               </div>
-              <input value={topicQ} placeholder="🔎 Search topics…"
-                onChange={e => setTopicQ(e.target.value)}
-                style={{ width: "100%", boxSizing: "border-box", fontSize: 15, padding: "9px 12px", borderRadius: 10, border: `2px solid ${C.line}`, background: C.panelHi, color: C.ink, fontFamily: "'Rubik', sans-serif", outline: "none", marginBottom: 8 }} />
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, maxHeight: 200, overflowY: "auto" }}>
-                {visible.map(tt => chip(draft.topic === tt.id, () => setDraft(v => ({ ...v, topic: tt.id })),
-                  `${tt.great.includes(draft.genre) ? "🔥 " : tt.bad.includes(draft.genre) ? "🧊 " : ""}${tt.name}`))}
-                {!visible.length && <div style={{ color: C.dim, fontSize: 14, padding: 8, gridColumn: "1 / -1" }}>No topics match — clear the search or pick another category.</div>}
+              <div style={{ fontSize: 13, color: C.dim, marginBottom: 10 }}>
+                {activeTopics.length} topics available. 🔥 great fit for {genreById(draft.genre).name.toLowerCase()} · 🧊 risky fit. New topics unlock as the years roll on.
               </div>
-            </>
-          );
-        })()}
+              {TOPIC_CATS.map(([catId, catLabel]) => {
+                const inCat = activeTopics
+                  .filter(tt => tt.cat === catId)
+                  .sort((a, b) => (a.great.includes(draft.genre) ? 0 : a.bad.includes(draft.genre) ? 2 : 1) - (b.great.includes(draft.genre) ? 0 : b.bad.includes(draft.genre) ? 2 : 1) || a.name.localeCompare(b.name));
+                if (!inCat.length) return null;
+                return (
+                  <div key={catId} style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 12, color: C.gold, letterSpacing: 1.2, margin: "10px 0 6px", fontWeight: 800 }}>{catLabel.toUpperCase()}</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 6 }}>
+                      {inCat.map(tt => chip(draft.topic === tt.id,
+                        () => { setDraft(v => ({ ...v, topic: tt.id })); setTopicPicker(false); },
+                        `${tt.great.includes(draft.genre) ? "🔥 " : tt.bad.includes(draft.genre) ? "🧊 " : ""}${tt.name}`))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
         <div style={{ marginTop: 12, fontWeight: 700, color: combo.startsWith("🔥") ? C.gold : combo.startsWith("🧊") ? C.red : C.dim }}>{combo}</div>
         {(() => {
           const mf = marketFactor(s, draft.genre, draft.topic);
@@ -3941,58 +4136,7 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, se
         </div>
       </Panel>
 
-      <Panel title="3 · PUBLISHING" accent={C.green} style={{ gridColumn: "1 / -1" }}>
-        <div style={{ fontSize: 14, color: C.dim, marginBottom: 12 }}>
-          A garage studio's game sinks without distribution — a publisher's logo is why anyone buys from a studio they've never heard of. The price: they keep 65% of revenue{`, and unless you negotiate otherwise, the IP too`}.
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 8 }}>
-          <button onClick={() => setPub(null)} style={{
-            padding: "12px 14px", minHeight: 64, borderRadius: 12, cursor: "pointer", textAlign: "left",
-            border: `2px solid ${!pub ? C.green : C.line}`, background: !pub ? "#123A28" : C.panelHi,
-            color: C.ink, fontFamily: "'Rubik', sans-serif", fontSize: 15, fontWeight: 700, touchAction: "manipulation",
-          }}>
-            ✊ Self-publish
-            <div style={{ fontSize: 12, color: C.dim, fontWeight: 400, marginTop: 2 }}>
-              Keep 100% of revenue and the IP. Sales lean entirely on your {s.fans.toLocaleString()} fans.
-            </div>
-          </button>
-          {PUBLISHERS.map(name => {
-            const rel = s.publishers?.[name]?.rel ?? 50;
-            const terms = pubDealTerms(name, rel, devCost, pub?.name === name ? pub.keepIp : false);
-            const outgrown = s.fans > terms.floor;
-            const refuses = rel < 25;
-            return (
-              <button key={name} disabled={refuses} onClick={() => setPub(v => v?.name === name ? v : { name, keepIp: false })} style={{
-                padding: "12px 14px", minHeight: 64, borderRadius: 12, cursor: refuses ? "default" : "pointer", textAlign: "left",
-                border: `2px solid ${pub?.name === name ? C.green : C.line}`, background: pub?.name === name ? "#123A28" : C.panelHi,
-                color: C.ink, fontFamily: "'Rubik', sans-serif", fontSize: 15, fontWeight: 700, touchAction: "manipulation", opacity: refuses ? 0.5 : 1,
-              }}>
-                📮 {name} <span style={{ fontSize: 11, color: rel >= 65 ? C.gold : rel >= 40 ? C.dim : C.red }}>rel {Math.round(rel)}</span>
-                <div style={{ fontSize: 12, color: C.dim, fontWeight: 400, marginTop: 2 }}>
-                  {refuses
-                    ? "Won't work with you after last time."
-                    : `Advance ${money$(terms.advance)} · reach ~${(terms.floor / 1000).toFixed(0)}K fans · you keep 35% · score guarantee: 55+`}
-                  {!refuses && outgrown && <span style={{ color: C.gold, fontWeight: 700 }}> · Your fans exceed their reach — you don't need them anymore.</span>}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-        {pub && (
-          <button onClick={() => setPub(v => ({ ...v, keepIp: !v.keepIp }))} style={{
-            width: "100%", marginTop: 10, padding: "10px 12px", minHeight: 48, borderRadius: 12, cursor: "pointer", textAlign: "left",
-            border: `2px solid ${pub.keepIp ? C.gold : C.line}`, background: pub.keepIp ? "#3A3110" : C.panelHi,
-            color: C.ink, fontFamily: "'Rubik', sans-serif", fontSize: 14, fontWeight: 700, touchAction: "manipulation",
-          }}>
-            📜 Keep the IP rights {pub.keepIp ? "— YES (advance halved)" : "— NO (they own the franchise)"}
-            <div style={{ fontSize: 11, color: C.dim, fontWeight: 400, marginTop: 2 }}>
-              If this game becomes a franchise, whoever holds the rights owns it. Half the advance buys your name on the deed.
-            </div>
-          </button>
-        )}
-      </Panel>
-
-      <Panel title="4 · DEV FOCUS" accent={C.gold} style={{ gridColumn: "1 / -1" }}>
+      <Panel title="3 · DEV FOCUS" accent={C.gold} style={{ gridColumn: "1 / -1" }}>
         <div style={{ fontSize: 15, color: C.dim, marginBottom: 14 }}>
           Allocate all <b style={{ color: C.gold }}>{size.points}</b> focus points. {g.name} games reward a particular balance — experiment.
           <span style={{ float: "right", fontWeight: 800, color: left === 0 ? C.green : C.gold }}>{left} left</span>
@@ -4023,30 +4167,22 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, se
                 </div>
               );
             })()}
-            {(() => {
-              const deal = pub ? pubDealTerms(pub.name, s.publishers?.[pub.name]?.rel ?? 50, devCost, pub.keepIp) : null;
-              const net = cost - (deal?.advance || 0);
-              return (
+            {(() => (
                 <>
                   Upfront cost: <b style={{ color: C.gold }}>{money$(cost)}</b>
                   <span style={{ color: C.dim }}> (dev {money$(devCost)}{draft.ip ? " after IP asset reuse" : ""} + platform {money$(effLicense(s, plat, s.week))}{engFee ? ` + engine fee ${money$(engFee)}` : ""})</span>
-                  {deal && (
-                    <div style={{ marginTop: 4 }}>
-                      📮 {deal.name} advance: <b style={{ color: C.green }}>+{money$(deal.advance)}</b> → net {net <= 0
-                        ? <b style={{ color: C.green }}>{money$(-net)} in your pocket day one</b>
-                        : <b style={{ color: C.gold }}>{money$(net)}</b>}
-                    </div>
-                  )}
+                  <div style={{ marginTop: 4, fontSize: 13, color: C.dim }}>
+                    📮 You fund development yourself — publishers come knocking when the game is finished, if it clears their bar.
+                  </div>
                   {draft.exclusive && plat.holder && (
                     <div style={{ marginTop: 4 }}>
                       🤝 {plat.holder} marketing fund: <b style={{ color: C.cyan }}>+{money$(Math.round(size.cost * 0.5 * (1 + (s.holders?.[plat.holder]?.rel ?? 50) / 100)))}</b>
                     </div>
                   )}
                 </>
-              );
-            })()}
+              ))()}
           </div>
-          <Btn color={C.green} disabled={!canStart} onClick={() => startProject({ ...draft, team, pubDeal: pub ? pubDealTerms(pub.name, s.publishers?.[pub.name]?.rel ?? 50, devCost, pub.keepIp) : null })}>
+          <Btn color={C.green} disabled={!canStart} onClick={() => startProject({ ...draft, team })}>
             🎮 Start development {twoTeams ? `(Team ${team})` : ""}
           </Btn>
         </div>
