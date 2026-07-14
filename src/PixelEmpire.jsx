@@ -3612,8 +3612,7 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, se
     exclusive: false,
   }));
   const [pub, setPub] = useState(null); // { name, keepIp } — null = self-publish
-  const [topicCat, setTopicCat] = useState(null); // null = all categories
-  const [topicQ, setTopicQ] = useState("");       // search filter
+  const [topicPicker, setTopicPicker] = useState(false); // full topic list modal
 
   // When a project wraps, clear the drafting table for the next pitch
   useEffect(() => {
@@ -3926,42 +3925,47 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, se
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
           {GENRES.map(gg => chip(draft.genre === gg.id, () => setDraft(v => ({ ...v, genre: gg.id })), gg.name))}
         </div>
-        <div style={{ fontSize: 13, color: C.dim, margin: "14px 0 6px", letterSpacing: 1 }}>
-          TOPIC — <b style={{ color: C.ink }}>{t?.name || draft.topic}</b> <span style={{ color: C.dim }}>· {activeTopics.length} available</span>
+        <div style={{ fontSize: 13, color: C.dim, margin: "14px 0 6px", letterSpacing: 1 }}>TOPIC</div>
+        <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
+          <div style={{
+            flex: 1, padding: "12px 14px", borderRadius: 12, border: `2px solid ${C.mag}`, background: "#3A2050",
+            color: C.ink, fontSize: 15, fontWeight: 600, display: "flex", alignItems: "center", gap: 8,
+          }}>
+            {t?.great.includes(draft.genre) ? "🔥" : t?.bad.includes(draft.genre) ? "🧊" : "•"} {t?.name || draft.topic}
+          </div>
+          <Btn small kind="ghost" color={C.cyan} onClick={() => setTopicPicker(true)}>
+            📚 Topics ({activeTopics.length})
+          </Btn>
         </div>
-        {(() => {
-          // Scales past 80 topics: filter by category and search instead of
-          // one pill per topic. Great fits for the chosen genre sort first.
-          const q = topicQ.trim().toLowerCase();
-          const cats = TOPIC_CATS.filter(([id]) => activeTopics.some(tt => tt.cat === id));
-          const rank = tt => (tt.great.includes(draft.genre) ? 0 : tt.bad.includes(draft.genre) ? 2 : 1);
-          const visible = activeTopics
-            .filter(tt => (!topicCat || tt.cat === topicCat) && (!q || tt.name.toLowerCase().includes(q)))
-            .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
-          const catBtn = (id, label) => (
-            <button key={label} onClick={() => setTopicCat(id)} style={{
-              padding: "7px 12px", minHeight: 36, borderRadius: 10, cursor: "pointer", whiteSpace: "nowrap",
-              border: `2px solid ${topicCat === id ? C.cyan : C.line}`, background: topicCat === id ? "#123A3E" : C.panelHi,
-              color: C.ink, fontFamily: "'Rubik', sans-serif", fontSize: 13, fontWeight: 700, touchAction: "manipulation",
-            }}>{label}</button>
-          );
-          return (
-            <>
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
-                {catBtn(null, "All")}
-                {cats.map(([id, label]) => catBtn(id, label))}
+        {topicPicker && (
+          <div onClick={() => setTopicPicker(false)} style={{ position: "fixed", inset: 0, background: "#000a", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 30, padding: 16 }}>
+            <div onClick={e => e.stopPropagation()} style={{ background: C.panel, border: `2px solid ${C.cyan}`, borderRadius: 22, padding: 20, maxWidth: 720, width: "100%", maxHeight: "88vh", overflowY: "auto", animation: "popIn .2s ease-out" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                <div style={{ fontFamily: "'Bungee', cursive", fontSize: 18, color: C.cyan }}>TOPICS · {year}</div>
+                <Btn small kind="ghost" onClick={() => setTopicPicker(false)}>✕ Close</Btn>
               </div>
-              <input value={topicQ} placeholder="🔎 Search topics…"
-                onChange={e => setTopicQ(e.target.value)}
-                style={{ width: "100%", boxSizing: "border-box", fontSize: 15, padding: "9px 12px", borderRadius: 10, border: `2px solid ${C.line}`, background: C.panelHi, color: C.ink, fontFamily: "'Rubik', sans-serif", outline: "none", marginBottom: 8 }} />
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, maxHeight: 200, overflowY: "auto" }}>
-                {visible.map(tt => chip(draft.topic === tt.id, () => setDraft(v => ({ ...v, topic: tt.id })),
-                  `${tt.great.includes(draft.genre) ? "🔥 " : tt.bad.includes(draft.genre) ? "🧊 " : ""}${tt.name}`))}
-                {!visible.length && <div style={{ color: C.dim, fontSize: 14, padding: 8, gridColumn: "1 / -1" }}>No topics match — clear the search or pick another category.</div>}
+              <div style={{ fontSize: 13, color: C.dim, marginBottom: 10 }}>
+                {activeTopics.length} topics available. 🔥 great fit for {genreById(draft.genre).name.toLowerCase()} · 🧊 risky fit. New topics unlock as the years roll on.
               </div>
-            </>
-          );
-        })()}
+              {TOPIC_CATS.map(([catId, catLabel]) => {
+                const inCat = activeTopics
+                  .filter(tt => tt.cat === catId)
+                  .sort((a, b) => (a.great.includes(draft.genre) ? 0 : a.bad.includes(draft.genre) ? 2 : 1) - (b.great.includes(draft.genre) ? 0 : b.bad.includes(draft.genre) ? 2 : 1) || a.name.localeCompare(b.name));
+                if (!inCat.length) return null;
+                return (
+                  <div key={catId} style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 12, color: C.gold, letterSpacing: 1.2, margin: "10px 0 6px", fontWeight: 800 }}>{catLabel.toUpperCase()}</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 6 }}>
+                      {inCat.map(tt => chip(draft.topic === tt.id,
+                        () => { setDraft(v => ({ ...v, topic: tt.id })); setTopicPicker(false); },
+                        `${tt.great.includes(draft.genre) ? "🔥 " : tt.bad.includes(draft.genre) ? "🧊 " : ""}${tt.name}`))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
         <div style={{ marginTop: 12, fontWeight: 700, color: combo.startsWith("🔥") ? C.gold : combo.startsWith("🧊") ? C.red : C.dim }}>{combo}</div>
         {(() => {
           const mf = marketFactor(s, draft.genre, draft.topic);
