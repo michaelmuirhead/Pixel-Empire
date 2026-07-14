@@ -148,10 +148,14 @@ function effLicense(s, p, week) {
   return Math.round(p.lic * (c >= 0.9 ? 1 : c >= 0.5 ? 0.85 : 0.6) * (1 - Math.max(0, rel - 50) / 200));
 }
 
+// Any studio can start any size — the only gate is having the cash. Team
+// headcount and skill set the pace (and quality) once development begins,
+// so a garage crew on a AAA game is in for a very long haul.
 const SIZES = [
-  { id: "S", name: "Small",  weeks: 8,  minWeeks: 6,  cost: 300,  points: 16, mult: 1.0, minStaff: 1 },
-  { id: "M", name: "Medium", weeks: 14, minWeeks: 10, cost: 700,  points: 20, mult: 1.9, minStaff: 3, techReq: 2 },
-  { id: "L", name: "Large",  weeks: 22, minWeeks: 14, cost: 1400, points: 24, mult: 3.2, minStaff: 5, techReq: 4 },
+  { id: "S",   name: "Small",  weeks: 8,  minWeeks: 6,  cost: 300,  points: 16, mult: 1.0 },
+  { id: "M",   name: "Medium", weeks: 14, minWeeks: 10, cost: 700,  points: 20, mult: 1.9 },
+  { id: "L",   name: "Large",  weeks: 22, minWeeks: 14, cost: 1400, points: 24, mult: 3.2 },
+  { id: "AAA", name: "AAA",    weeks: 34, minWeeks: 20, cost: 3000, points: 28, mult: 5.0 },
 ];
 
 // Bigger hardware = bigger games: total work scales with platform tech tier
@@ -522,6 +526,7 @@ function computeScore(state, proj) {
   raw += Math.min(3, state.staff.filter(m => m.trait === "perfectionist" && !m.resting && (m.team || "A") === projTeam).length); // perfectionists sweat the details
   raw *= (0.9 + 0.1 * (state.morale / 80));
   if (size.id === "L") raw += 3;
+  if (size.id === "AAA") raw += 5;
   raw += proj.vision || 0; // a strong pre-production pays off at review time
   if (proj.remakeOf) {
     raw += proj.remakeOf.mode === "remaster" ? 0 : 2;            // remakes build on a proven design
@@ -1319,7 +1324,7 @@ function tick(prev) {
       const bugRate = (s.tech.includes("qa") ? 0.6 : 1)
         * (s.staff.some(m => m.trait === "bugmagnet" && crew(m)) ? 1.1 : 1)
         * (np.crunch ? 1.25 : 1);
-      np.bugs += rnd(0.4, 1.3) * bugRate * (np.size === "L" ? 1.5 : np.size === "M" ? 1.15 : 1);
+      np.bugs += rnd(0.4, 1.3) * bugRate * (np.size === "AAA" ? 1.9 : np.size === "L" ? 1.5 : np.size === "M" ? 1.15 : 1);
       s.rp += rnd(0.6, 1.4);
       if (np.progress >= np.totalWeeks) {
         np.stage = "polish";
@@ -3444,8 +3449,9 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setLive, t
     return { ...v, alloc: { ...v.alloc, [k]: nv } };
   });
 
-  const canStart = draft.name.trim() && left === 0 && s.money >= cost &&
-    s.staff.length >= size.minStaff && (!size.techReq || s.tech.some(id => (TECH_TREE.find(x => x.id === id)?.q || 0) >= (size.techReq - 1) * 6));
+  // Money is the only gate on project size — a small or unskilled team just
+  // develops slower and worse, it isn't barred from dreaming big.
+  const canStart = draft.name.trim() && left === 0 && s.money >= cost;
 
   const chip = (active, onClick, label, sub) => (
     <button onClick={onClick} style={{
@@ -3621,10 +3627,10 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setLive, t
           );
         })()}
         <div style={{ fontSize: 13, color: C.dim, margin: "14px 0 6px", letterSpacing: 1 }}>PROJECT SIZE</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8 }}>
           {SIZES.map(z => chip(draft.size === z.id, () => setDraft(v => ({
             ...v, size: z.id, alloc: normalizeAlloc(v.alloc, z.points),
-          })), z.name, `${Math.round(z.weeks * workScale(plat.tech))} work · min ${z.minWeeks}w · needs ${z.minStaff}+ staff`))}
+          })), z.name, `${Math.round(z.weeks * workScale(plat.tech))} work · min ${z.minWeeks}w · dev ${money$(z.cost)}`))}
         </div>
       </Panel>
 
@@ -3742,7 +3748,6 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setLive, t
             {!draft.name.trim() ? "Give your game a title. " : ""}
             {left !== 0 ? "Spend all focus points. " : ""}
             {s.money < cost ? "Not enough cash. " : ""}
-            {s.staff.length < size.minStaff ? `Needs at least ${size.minStaff} team members. ` : ""}
           </div>
         )}
       </Panel>
