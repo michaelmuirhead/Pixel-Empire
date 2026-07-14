@@ -2106,10 +2106,15 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
     };
   });
 
-  const releaseGame = (team = "A") => update(prev => {
+  const releaseGame = (team = "A", launchDeal = null) => update(prev => {
     const slot = slotOf(team);
-    const p = prev[slot];
-    if (!p) return prev;
+    const p0 = prev[slot];
+    if (!p0) return prev;
+    // Publishers sign the finished game at launch. Older saves may still carry
+    // a deal signed at greenlight on the project itself — honor it, but don't
+    // pay its advance twice (it was paid at start).
+    const p = launchDeal ? { ...p0, pubDeal: launchDeal } : p0;
+    const signAdvance = launchDeal ? launchDeal.advance : 0;
     const score = computeScore(prev, p);
     // A publisher's logo on the box is distribution: sales calculate as if you
     // had at least their reach in fans — but they keep 65% of revenue.
@@ -2284,8 +2289,8 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
       ips,
       publishers,
       pubIps: (typeof pubKeptIp !== "undefined" && pubKeptIp) ? [...(prev.pubIps || []), pubKeptIp] : (prev.pubIps || []),
-      money: prev.money - clawback + launchBonus,
-      yearStats: ysAdd(ysAdd(prev.yearStats, "exp", "biz", clawback), "rev", "funding", launchBonus),
+      money: prev.money - clawback + launchBonus + signAdvance,
+      yearStats: ysAdd(ysAdd(prev.yearStats, "exp", "biz", clawback), "rev", "funding", launchBonus + signAdvance),
       holders,
       [slot]: null,
       released: [rec, ...prev.released],
@@ -2309,6 +2314,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
     if (remakeLog) out.log = pushLog(out, remakeLog);
     if (mkt <= 0.85) out.log = pushLog(out, `🥵 The market is flooded with ${genreById(p.genre).name.toLowerCase()} / ${topicById(p.topic).name.toLowerCase()} games right now — sales take a ${Math.round((1 - mkt) * 100)}% haircut.`);
     if (mkt >= 1.05) out.log = pushLog(out, `🌱 Nobody's been making ${genreById(p.genre).name.toLowerCase()} games — starved buyers pay a premium.`);
+    if (launchDeal) out.log = pushLog(out, `📮 ${launchDeal.name} signed "${rec.name}" off the finished build — advance ${money$(launchDeal.advance)}, they keep ${100 - Math.round(launchDeal.share * 100)}% of revenue${launchDeal.ipRights ? "" : " and the IP, if this becomes one"}.`);
     if (rec.mmo) out.log = pushLog(out, `🌍 "${rec.name}" opened its servers to ${rec.subs.toLocaleString()} subscribers. The meter runs both ways — subscriptions in, server bills out.`);
     else if (rec.live) out.log = pushLog(out, `🌐 "${rec.name}" launched as a live-service game — weekly revenue as long as you keep it healthy.`);
     if (pubLog) out.log = pushLog(out, pubLog);
@@ -3630,13 +3636,14 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, se
     remakeOf: null, // { id, name, score, year }
     exclusive: false,
   }));
-  const [pub, setPub] = useState(null); // { name, keepIp } — null = self-publish
+  const [launchPub, setLaunchPub] = useState(null); // { name, keepIp } — publisher signing the FINISHED game; null = self-publish
   const [topicPicker, setTopicPicker] = useState(false); // full topic list modal
 
   // When a project wraps, clear the drafting table for the next pitch
   useEffect(() => {
     if (!curProj) setDraft(v => ({ ...v, ip: null, remakeOf: null, name: "" }));
-  }, [curProj]);
+    setLaunchPub(null);
+  }, [curProj, team]);
 
   const teamBar = twoTeams ? (
     <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
@@ -3663,6 +3670,18 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, se
       const est = Math.round(sum / 7);
       band = [Math.max(5, est - 5), Math.min(98, est + 5)];
     }
+    // Publishers bid on the FINISHED game: size, predicted quality (focus
+    // testing sharpens their read), hype, and your relationship set the offer.
+    const offers = canRelease ? PUBLISHERS.filter(pb => pubActive(pb, year)).map(pb => {
+      const rel = s.publishers?.[pb.name]?.rel ?? 50;
+      const sizeC = SIZES.find(z => z.id === p.size) || SIZES[0];
+      const qMult = band ? Math.max(0.4, ((band[0] + band[1]) / 2) / 65) : 1;
+      const hMult = 1 + (p.hype || 0) / 400;
+      const basis = Math.round(sizeC.cost * (p.ip ? 0.75 : 1) * qMult * hMult);
+      const terms = pubDealTerms(pb, rel, basis, launchPub?.name === pb.name ? launchPub.keepIp : false);
+      return { pb, rel, terms, refuses: rel < 25, locked: (s.rep ?? 50) < pb.minRep };
+    }) : [];
+    const chosenOffer = launchPub ? offers.find(o => o.pb.name === launchPub.name && !o.refuses && !o.locked) : null;
     return (
       <>
       {teamBar}
@@ -3756,8 +3775,55 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, se
               <div style={{ fontSize: 11, color: C.dim, fontWeight: 400, marginTop: 2 }}>Subscription revenue from a persistent world — but the server bill never sleeps. Expansions bring lapsed players home; a dying MMO bleeds money until you sunset it.</div>
             </button>
           )}
-          <Btn color={C.green} disabled={!canRelease} onClick={() => releaseGame(team)} style={{ width: "100%" }}>
-            {canRelease ? (p.mmo ? "🌍 Open the servers" : p.live ? "🌐 Launch the service" : "🚀 Release the game") : "Finish development first"}
+          {canRelease && (
+            <>
+              <div style={{ fontSize: 13, color: C.dim, letterSpacing: 1, margin: "4px 0 6px" }}>PUBLISHING — OFFERS ON THE FINISHED BUILD</div>
+              <div style={{ display: "grid", gap: 6, marginBottom: 10 }}>
+                <button onClick={() => setLaunchPub(null)} style={{
+                  padding: "10px 12px", minHeight: 48, borderRadius: 12, cursor: "pointer", textAlign: "left",
+                  border: `2px solid ${!launchPub ? C.green : C.line}`, background: !launchPub ? "#123A28" : C.panelHi,
+                  color: C.ink, fontFamily: "'Rubik', sans-serif", fontSize: 14, fontWeight: 700, touchAction: "manipulation",
+                }}>
+                  ✊ Self-publish
+                  <div style={{ fontSize: 11, color: C.dim, fontWeight: 400, marginTop: 2 }}>Keep 100% of revenue and the IP. Sales lean entirely on your {s.fans.toLocaleString()} fans.</div>
+                </button>
+                {offers.map(({ pb, rel, terms, refuses, locked }) => {
+                  const off = refuses || locked;
+                  const sel = launchPub?.name === pb.name;
+                  return (
+                    <button key={pb.name} disabled={off} onClick={() => setLaunchPub(v => v?.name === pb.name ? v : { name: pb.name, keepIp: false })} style={{
+                      padding: "10px 12px", minHeight: 48, borderRadius: 12, cursor: off ? "default" : "pointer", textAlign: "left",
+                      border: `2px solid ${sel ? C.green : C.line}`, background: sel ? "#123A28" : C.panelHi,
+                      color: C.ink, fontFamily: "'Rubik', sans-serif", fontSize: 14, fontWeight: 700, touchAction: "manipulation", opacity: off ? 0.5 : 1,
+                    }}>
+                      📮 {pb.name} <span style={{ fontSize: 11, color: C.cyan }}>{pb.tier}</span> <span style={{ fontSize: 11, color: rel >= 65 ? C.gold : rel >= 40 ? C.dim : C.red }}>rel {Math.round(rel)}</span>
+                      <div style={{ fontSize: 11, color: C.dim, fontWeight: 400, marginTop: 2 }}>
+                        {refuses
+                          ? "Won't work with you after last time."
+                          : locked
+                          ? `Only signs proven studios — reputation ${pb.minRep}+ required (yours: ${Math.round(s.rep ?? 50)}).`
+                          : `Advance ${money$(terms.advance)} · reach ~${(terms.floor / 1000).toFixed(0)}K fans · you keep ${Math.round(pb.share * 100)}% · ${pb.guarantee ? `score guarantee: ${pb.guarantee}+` : "no score guarantee"}`}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+              {chosenOffer && (
+                <button onClick={() => setLaunchPub(v => ({ ...v, keepIp: !v.keepIp }))} style={{
+                  width: "100%", marginBottom: 10, padding: "10px 12px", minHeight: 48, borderRadius: 12, cursor: "pointer", textAlign: "left",
+                  border: `2px solid ${launchPub.keepIp ? C.gold : C.line}`, background: launchPub.keepIp ? "#3A3110" : C.panelHi,
+                  color: C.ink, fontFamily: "'Rubik', sans-serif", fontSize: 14, fontWeight: 700, touchAction: "manipulation",
+                }}>
+                  📜 Keep the IP rights {launchPub.keepIp ? "— YES (advance halved)" : "— NO (they own the franchise)"}
+                  <div style={{ fontSize: 11, color: C.dim, fontWeight: 400, marginTop: 2 }}>
+                    If this game becomes a franchise, whoever holds the rights owns it. Half the advance buys your name on the deed.
+                  </div>
+                </button>
+              )}
+            </>
+          )}
+          <Btn color={C.green} disabled={!canRelease} onClick={() => releaseGame(team, chosenOffer ? chosenOffer.terms : null)} style={{ width: "100%" }}>
+            {canRelease ? (chosenOffer ? `📮 Release via ${chosenOffer.pb.name}` : p.mmo ? "🌍 Open the servers" : p.live ? "🌐 Launch the service" : "🚀 Release the game") : "Finish development first"}
           </Btn>
           {canRelease && p.bugs > 5 && (
             <div style={{ marginTop: 12, fontSize: 14, color: C.red }}>
@@ -4056,63 +4122,7 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, se
         </div>
       </Panel>
 
-      <Panel title="3 · PUBLISHING" accent={C.green} style={{ gridColumn: "1 / -1" }}>
-        <div style={{ fontSize: 14, color: C.dim, marginBottom: 12 }}>
-          A garage studio's game sinks without distribution — a publisher's logo is why anyone buys from a studio they've never heard of. The bigger the house, the bigger the advance and reach — and the deeper their cut. Unless you negotiate otherwise, they keep the IP too.
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 8 }}>
-          <button onClick={() => setPub(null)} style={{
-            padding: "12px 14px", minHeight: 64, borderRadius: 12, cursor: "pointer", textAlign: "left",
-            border: `2px solid ${!pub ? C.green : C.line}`, background: !pub ? "#123A28" : C.panelHi,
-            color: C.ink, fontFamily: "'Rubik', sans-serif", fontSize: 15, fontWeight: 700, touchAction: "manipulation",
-          }}>
-            ✊ Self-publish
-            <div style={{ fontSize: 12, color: C.dim, fontWeight: 400, marginTop: 2 }}>
-              Keep 100% of revenue and the IP. Sales lean entirely on your {s.fans.toLocaleString()} fans.
-            </div>
-          </button>
-          {PUBLISHERS.filter(pb => pubActive(pb, year)).map(pb => {
-            const name = pb.name;
-            const rel = s.publishers?.[name]?.rel ?? 50;
-            const terms = pubDealTerms(pb, rel, devCost, pub?.name === name ? pub.keepIp : false);
-            const outgrown = s.fans > terms.floor;
-            const refuses = rel < 25;
-            const locked = (s.rep ?? 50) < pb.minRep;
-            const off = refuses || locked;
-            return (
-              <button key={name} disabled={off} onClick={() => setPub(v => v?.name === name ? v : { name, keepIp: false })} style={{
-                padding: "12px 14px", minHeight: 64, borderRadius: 12, cursor: off ? "default" : "pointer", textAlign: "left",
-                border: `2px solid ${pub?.name === name ? C.green : C.line}`, background: pub?.name === name ? "#123A28" : C.panelHi,
-                color: C.ink, fontFamily: "'Rubik', sans-serif", fontSize: 15, fontWeight: 700, touchAction: "manipulation", opacity: off ? 0.5 : 1,
-              }}>
-                📮 {name} <span style={{ fontSize: 11, color: C.cyan }}>{pb.tier}</span> <span style={{ fontSize: 11, color: rel >= 65 ? C.gold : rel >= 40 ? C.dim : C.red }}>rel {Math.round(rel)}</span>
-                <div style={{ fontSize: 12, color: C.dim, fontWeight: 400, marginTop: 2 }}>
-                  {refuses
-                    ? "Won't work with you after last time."
-                    : locked
-                    ? `Only signs proven studios — reputation ${pb.minRep}+ required (yours: ${Math.round(s.rep ?? 50)}).`
-                    : `Advance ${money$(terms.advance)} · reach ~${(terms.floor / 1000).toFixed(0)}K fans · you keep ${Math.round(pb.share * 100)}% · ${pb.guarantee ? `score guarantee: ${pb.guarantee}+` : "no score guarantee"}`}
-                  {!off && outgrown && <span style={{ color: C.gold, fontWeight: 700 }}> · Your fans exceed their reach — you don't need them anymore.</span>}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-        {pub && (
-          <button onClick={() => setPub(v => ({ ...v, keepIp: !v.keepIp }))} style={{
-            width: "100%", marginTop: 10, padding: "10px 12px", minHeight: 48, borderRadius: 12, cursor: "pointer", textAlign: "left",
-            border: `2px solid ${pub.keepIp ? C.gold : C.line}`, background: pub.keepIp ? "#3A3110" : C.panelHi,
-            color: C.ink, fontFamily: "'Rubik', sans-serif", fontSize: 14, fontWeight: 700, touchAction: "manipulation",
-          }}>
-            📜 Keep the IP rights {pub.keepIp ? "— YES (advance halved)" : "— NO (they own the franchise)"}
-            <div style={{ fontSize: 11, color: C.dim, fontWeight: 400, marginTop: 2 }}>
-              If this game becomes a franchise, whoever holds the rights owns it. Half the advance buys your name on the deed.
-            </div>
-          </button>
-        )}
-      </Panel>
-
-      <Panel title="4 · DEV FOCUS" accent={C.gold} style={{ gridColumn: "1 / -1" }}>
+      <Panel title="3 · DEV FOCUS" accent={C.gold} style={{ gridColumn: "1 / -1" }}>
         <div style={{ fontSize: 15, color: C.dim, marginBottom: 14 }}>
           Allocate all <b style={{ color: C.gold }}>{size.points}</b> focus points. {g.name} games reward a particular balance — experiment.
           <span style={{ float: "right", fontWeight: 800, color: left === 0 ? C.green : C.gold }}>{left} left</span>
@@ -4143,30 +4153,22 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, se
                 </div>
               );
             })()}
-            {(() => {
-              const deal = pub ? pubDealTerms(pubByName(pub.name), s.publishers?.[pub.name]?.rel ?? 50, devCost, pub.keepIp) : null;
-              const net = cost - (deal?.advance || 0);
-              return (
+            {(() => (
                 <>
                   Upfront cost: <b style={{ color: C.gold }}>{money$(cost)}</b>
                   <span style={{ color: C.dim }}> (dev {money$(devCost)}{draft.ip ? " after IP asset reuse" : ""} + platform {money$(effLicense(s, plat, s.week))}{engFee ? ` + engine fee ${money$(engFee)}` : ""})</span>
-                  {deal && (
-                    <div style={{ marginTop: 4 }}>
-                      📮 {deal.name} advance: <b style={{ color: C.green }}>+{money$(deal.advance)}</b> → net {net <= 0
-                        ? <b style={{ color: C.green }}>{money$(-net)} in your pocket day one</b>
-                        : <b style={{ color: C.gold }}>{money$(net)}</b>}
-                    </div>
-                  )}
+                  <div style={{ marginTop: 4, fontSize: 13, color: C.dim }}>
+                    📮 You fund development yourself — publishers bid on the finished game at launch.
+                  </div>
                   {draft.exclusive && plat.holder && (
                     <div style={{ marginTop: 4 }}>
                       🤝 {plat.holder} marketing fund: <b style={{ color: C.cyan }}>+{money$(Math.round(size.cost * 0.5 * (1 + (s.holders?.[plat.holder]?.rel ?? 50) / 100)))}</b>
                     </div>
                   )}
                 </>
-              );
-            })()}
+              ))()}
           </div>
-          <Btn color={C.green} disabled={!canStart} onClick={() => startProject({ ...draft, team, pubDeal: pub ? pubDealTerms(pubByName(pub.name), s.publishers?.[pub.name]?.rel ?? 50, devCost, pub.keepIp) : null })}>
+          <Btn color={C.green} disabled={!canStart} onClick={() => startProject({ ...draft, team })}>
             🎮 Start development {twoTeams ? `(Team ${team})` : ""}
           </Btn>
         </div>
