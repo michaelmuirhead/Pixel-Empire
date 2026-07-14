@@ -709,8 +709,7 @@ async function loadGame() {
 }
 
 // ---------- IP SYSTEM ----------
-
-const IP_MIN_SCORE = 55; // a standalone game this good becomes registered IP
+// Every original game registers as IP on release, whatever it scores.
 
 // Star rating, 0–5 in half-star steps. Quality drives it; fans lift it;
 // fatigue and years of dormancy drag it down.
@@ -873,13 +872,11 @@ function simulateRivals(s, year) {
         }
       } else {
         title = rivalGameName();
-        if (score >= IP_MIN_SCORE) {
-          r.ips = [...r.ips, {
-            id: "riv-" + Math.random().toString(36).slice(2),
-            name: title, entries: 1, fans: Math.round(Math.pow(score / 10, 2.2) * 25),
-            fatigue: 15, lastScore: score, bestScore: score, lastWeek: s.week, hue: ri(0, 360),
-          }];
-        }
+        r.ips = [...r.ips, {
+          id: "riv-" + Math.random().toString(36).slice(2),
+          name: title, entries: 1, fans: Math.round(Math.pow(score / 10, 2.2) * 25),
+          fatigue: 15, lastScore: score, bestScore: score, lastWeek: s.week, hue: ri(0, 360),
+        }];
         if (score >= 80) s.log = pushLog(s, `🔥 ${r.name} launched a new IP, "${title}" — ${score}/100.`);
       }
       r.lastRelease = { name: title, score, year, genre: genreId };
@@ -1948,7 +1945,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
         fatigue: Math.min(100, ip.fatigue + 25),
         lastScore: score, bestScore: Math.max(ip.bestScore, score), lastWeek: prev.week,
       };
-    } else if (!p.ip && score >= IP_MIN_SCORE) {
+    } else if (!p.ip) {
       const ip = {
         id: rec.id, name: rec.name, entries: 1,
         fans: Math.round(Math.pow(score / 10, 2.2) * 25),
@@ -1956,9 +1953,9 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
       };
       if (p.pubDeal && !p.pubDeal.ipRights) {
         // The classic knife: the publisher funded it, the publisher owns it
-        frLog = `📜 "${rec.name}" is franchise material — and per your deal, ${p.pubDeal.name} owns the IP. Buying it back won't be cheap.`;
+        frLog = `📜 "${rec.name}" is now a registered IP — and per your deal, ${p.pubDeal.name} owns it. Buying it back won't be cheap.`;
       } else {
-        // A strong original registers as new IP you own
+        // Every original registers as new IP you own
         ips[ip.id] = ip;
         rec.ipId = ip.id;
         rec.entryNo = 1;
@@ -3481,7 +3478,7 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setLive, t
           <>
             <div style={{ fontSize: 13, color: C.dim, margin: "0 0 6px", letterSpacing: 1 }}>ORIGINAL OR EXISTING IP?</div>
             <div style={{ display: "grid", gap: 8, marginBottom: 14, maxHeight: 200, overflowY: "auto" }}>
-              {chip(!draft.ip, chooseOriginal, "✦ Original title", "A fresh idea — no expectations, no fanbase. Score 55+ and it becomes new IP.")}
+              {chip(!draft.ip, chooseOriginal, "✦ Original title", "A fresh idea — no expectations, no fanbase. It registers as new IP on release.")}
               {myIps.map(ip => (
                 <button key={ip.id} onClick={() => chooseIp(ip)} style={{
                   padding: "12px 14px", minHeight: 48, borderRadius: 12, cursor: "pointer", textAlign: "left",
@@ -4016,7 +4013,7 @@ function IpTab({ s, sellIp, buyIp, renameIp, buybackPubIp, openTalks, orderSeque
       <Panel title="YOUR IP PORTFOLIO" accent={C.gold}>
         {myIps.length === 0 && (
           <div style={{ color: C.dim, fontSize: 16, lineHeight: 1.5 }}>
-            You don't own any IP yet. Release an original game scoring 55+ and it registers automatically — or buy one off the market below.
+            You don't own any IP yet. Release an original game and it registers automatically — or buy one off the market below.
           </div>
         )}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12 }}>
