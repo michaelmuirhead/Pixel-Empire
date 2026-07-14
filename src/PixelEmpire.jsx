@@ -548,7 +548,7 @@ function freshState(studioName, founder) {
     bidWar: null,
     loan: null, loanUsed: false, bankOffer: null,
     acqTalks: null, acqWar: null, buyoutOffer: null, soldOut: null,
-    publishers: Object.fromEntries(PUBLISHERS.map(p => [p, { rel: 50 }])),
+    publishers: Object.fromEntries(PUBLISHERS.map(p => [p.name, { rel: 50 }])),
     pubIps: [],          // your franchises a publisher kept the rights to
     pitches: [],         // indie pitch board (once you're a label)
     nextPitchWeek: 0,
@@ -784,7 +784,7 @@ async function loadGame() {
       s.log = pushLog(s, "🎮 The industry's history books have been rewritten — your catalog now lives on the real console timeline.");
     }
     if (!s.publishers) {
-      s.publishers = Object.fromEntries(PUBLISHERS.map(p => [p, { rel: 50 }]));
+      s.publishers = Object.fromEntries(PUBLISHERS.map(p => [p.name, { rel: 50 }]));
       s.pubIps = []; s.pitches = []; s.nextPitchWeek = s.week; s.pubProjects = [];
     }
     if (!s.leadId) s.leadId = s.staff[0]?.id || null;
@@ -800,6 +800,7 @@ async function loadGame() {
         s[k] = { ...p, maxWeekly: p.totalWeeks / sz.minWeeks, vision: 0, crunch: false };
       }
     }
+    if (s.publishers) for (const p of PUBLISHERS) if (!s.publishers[p.name]) s.publishers[p.name] = { rel: 50 };
     if (!s.yearStats) s.yearStats = { revenue: 0, lastRevenue: 0, fansStart: s.fans, repStart: s.rep ?? 50, topRival: null };
     if (s.yearReview === undefined) s.yearReview = null;
     if (s.yearStats.cashStart === undefined) s.yearStats = { ...s.yearStats, cashStart: s.money, rev: {}, exp: {} };
@@ -1137,15 +1138,28 @@ function simulateRivals(s, year) {
 
 // ---------- CONTRACTS ----------
 
-const PUBLISHERS = ["Meridian Publishing", "Starcade Media", "Vantage Bros.", "Crescent Co."];
+// Publishers differ in size and availability: boutiques take anyone and let
+// you keep more, majors and giants demand reputation and hits but bring huge
+// advances and reach. Some enter or fold as the timeline rolls on.
+//   share: the cut YOU keep · adv: advance as a multiple of dev cost
+//   reach/reachRel: fan floor their logo buys · guarantee: clawback below this
+const PUBLISHERS = [
+  { name: "Crescent Co.",          tier: "Boutique",     from: 1984,             share: 0.50, adv: 0.45, reach: 8000,  reachRel: 60,  guarantee: 0,  minRep: 0 },
+  { name: "Starcade Media",        tier: "Mid-size",     from: 1984, until: 2003, share: 0.35, adv: 0.85, reach: 18000, reachRel: 100, guarantee: 55, minRep: 30 },
+  { name: "Meridian Publishing",   tier: "Mid-size",     from: 1984,             share: 0.35, adv: 0.85, reach: 18000, reachRel: 100, guarantee: 55, minRep: 35 },
+  { name: "Vantage Bros.",         tier: "Major",        from: 1984,             share: 0.30, adv: 1.25, reach: 40000, reachRel: 180, guarantee: 60, minRep: 50 },
+  { name: "Titanwave Interactive", tier: "Global giant", from: 1996,             share: 0.25, adv: 1.90, reach: 85000, reachRel: 300, guarantee: 65, minRep: 65 },
+  { name: "Sprout Label",          tier: "Boutique",     from: 2005,             share: 0.55, adv: 0.40, reach: 12000, reachRel: 80,  guarantee: 0,  minRep: 0 },
+  { name: "Pocketworks",           tier: "Mid-size",     from: 2009,             share: 0.35, adv: 0.90, reach: 30000, reachRel: 140, guarantee: 50, minRep: 25 },
+];
+const pubByName = n => PUBLISHERS.find(p => p.name === n);
+const pubActive = (p, year) => year >= p.from && year <= (p.until || 9999);
 
-// Publisher reach: the fan floor their logo on the box buys you
-const pubReach = rel => 18000 + rel * 100;
-
-// Deal terms scale with your relationship
-function pubDealTerms(pub, rel, devCost, keepIp) {
-  const advance = Math.round(devCost * (0.8 + rel / 200) * (keepIp ? 0.5 : 1));
-  return { name: pub, advance, share: 0.35, floor: pubReach(rel), ipRights: keepIp };
+// Deal terms scale with the publisher's size and your relationship
+function pubDealTerms(pubObj, rel, devCost, keepIp) {
+  const advance = Math.round(devCost * pubObj.adv * (0.8 + rel / 200) * (keepIp ? 0.5 : 1));
+  const floor = pubObj.reach + Math.round(rel * pubObj.reachRel);
+  return { name: pubObj.name, advance, share: pubObj.share, floor, ipRights: keepIp, guarantee: pubObj.guarantee };
 }
 
 const INDIE_NAMES = ["Moonlight Attic", "Cardboard Rocket", "Two Brothers Basement", "Neon Possum", "Static Cling Games", "Paper Lantern", "Rust Belt Studio", "Midnight Waffle", "Glass Cannon Collective", "Tumbleweed Digital", "Fern & Pixel", "Broke Compass"];
@@ -1176,7 +1190,7 @@ const CONTRACT_TIERS = [
 function makeContract(year, rivalNames) {
   const t = pick(CONTRACT_TIERS);
   const infl = 1 + (year - 1984) * 0.07;
-  const client = Math.random() < 0.5 && rivalNames.length ? pick(rivalNames) : pick(PUBLISHERS);
+  const client = Math.random() < 0.5 && rivalNames.length ? pick(rivalNames) : pick(PUBLISHERS.filter(p => pubActive(p, year))).name;
   return {
     id: Math.random().toString(36).slice(2),
     client, job: pick(CONTRACT_JOBS), tier: t.tier,
@@ -1673,7 +1687,7 @@ function tick(prev) {
   if (s.week % 52 === 30 || (!s.engineMarket?.length && s.week % 13 === 0)) {
     const sellers = independentRivals(s).filter(r => r.arch === "tech" || r.arch === "blockbuster");
     const offer = () => {
-      const seller = sellers.length ? pick(sellers) : { name: pick(PUBLISHERS), id: null, arch: "tech" };
+      const seller = sellers.length ? pick(sellers) : { name: pick(PUBLISHERS).name, id: null, arch: "tech" };
       const power = Math.round(era * rnd(0.85, 1.2) * (seller.arch === "tech" ? 1.15 : 1));
       return {
         id: Math.random().toString(36).slice(2),
@@ -1771,6 +1785,10 @@ function tick(prev) {
     const fresh = TOPICS.filter(t => t.yr === year);
     if (fresh.length) {
       s.log = pushLog(s, `💡 New trends for ${year}: ${fresh.map(t => t.name).join(", ")} ${fresh.length > 1 ? "are" : "is"} now on the greenlight board.`);
+    }
+    for (const pb of PUBLISHERS) {
+      if (pb.from === year) s.log = pushLog(s, `📮 ${pb.name} opens for business — a ${pb.tier.toLowerCase()} publisher is signing studios.`);
+      if (pb.until && pb.until === year - 1) s.log = pushLog(s, `📮 ${pb.name} has shut its doors. An era ends — their deals die with them.`);
     }
     const prevYear = year - 1;
     const ys = s.yearStats || { revenue: 0, fansStart: 0, repStart: 50, topRival: null, lastRevenue: 0 };
@@ -2040,7 +2058,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
         };
       })(),
       log: pushLog(prev, draft.pubDeal
-        ? `Development begins on "${draft.name}" — published by ${draft.pubDeal.name}. Advance: ${money$(draft.pubDeal.advance)}. They keep 65% of revenue${draft.pubDeal.ipRights ? "" : " — and the IP, if this becomes one"}.`
+        ? `Development begins on "${draft.name}" — published by ${draft.pubDeal.name}. Advance: ${money$(draft.pubDeal.advance)}. They keep ${100 - Math.round(draft.pubDeal.share * 100)}% of revenue${draft.pubDeal.ipRights ? "" : " — and the IP, if this becomes one"}.`
         : draft.remakeOf
         ? `Development begins on "${draft.name}" — a remake of the ${draft.remakeOf.year} classic, for ${plat.name}. Nostalgia is a double-edged sword.`
         : draft.ip
@@ -2241,11 +2259,12 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
     if (p.pubDeal) {
       rec.pubName = p.pubDeal.name;
       const rel0 = publishers?.[p.pubDeal.name]?.rel ?? 50;
+      const guar = p.pubDeal.guarantee ?? 55; // older deals carried the classic 55+ clause
       let relD;
-      if (score < 55) {
+      if (guar && score < guar) {
         clawback = Math.round(p.pubDeal.advance * 0.5);
         relD = -20;
-        pubLog = `📮 "${rec.name}" missed ${p.pubDeal.name}'s score guarantee (${score} < 55). They clawed back ${money$(clawback)} of the advance — and they're furious.`;
+        pubLog = `📮 "${rec.name}" missed ${p.pubDeal.name}'s score guarantee (${score} < ${guar}). They clawed back ${money$(clawback)} of the advance — and they're furious.`;
       } else if (score >= 75) {
         relD = 10;
         pubLog = `📮 ${p.pubDeal.name} is thrilled with "${rec.name}" — expect a better advance next time.`;
@@ -4039,7 +4058,7 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, se
 
       <Panel title="3 · PUBLISHING" accent={C.green} style={{ gridColumn: "1 / -1" }}>
         <div style={{ fontSize: 14, color: C.dim, marginBottom: 12 }}>
-          A garage studio's game sinks without distribution — a publisher's logo is why anyone buys from a studio they've never heard of. The price: they keep 65% of revenue{`, and unless you negotiate otherwise, the IP too`}.
+          A garage studio's game sinks without distribution — a publisher's logo is why anyone buys from a studio they've never heard of. The bigger the house, the bigger the advance and reach — and the deeper their cut. Unless you negotiate otherwise, they keep the IP too.
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 8 }}>
           <button onClick={() => setPub(null)} style={{
@@ -4052,23 +4071,28 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, se
               Keep 100% of revenue and the IP. Sales lean entirely on your {s.fans.toLocaleString()} fans.
             </div>
           </button>
-          {PUBLISHERS.map(name => {
+          {PUBLISHERS.filter(pb => pubActive(pb, year)).map(pb => {
+            const name = pb.name;
             const rel = s.publishers?.[name]?.rel ?? 50;
-            const terms = pubDealTerms(name, rel, devCost, pub?.name === name ? pub.keepIp : false);
+            const terms = pubDealTerms(pb, rel, devCost, pub?.name === name ? pub.keepIp : false);
             const outgrown = s.fans > terms.floor;
             const refuses = rel < 25;
+            const locked = (s.rep ?? 50) < pb.minRep;
+            const off = refuses || locked;
             return (
-              <button key={name} disabled={refuses} onClick={() => setPub(v => v?.name === name ? v : { name, keepIp: false })} style={{
-                padding: "12px 14px", minHeight: 64, borderRadius: 12, cursor: refuses ? "default" : "pointer", textAlign: "left",
+              <button key={name} disabled={off} onClick={() => setPub(v => v?.name === name ? v : { name, keepIp: false })} style={{
+                padding: "12px 14px", minHeight: 64, borderRadius: 12, cursor: off ? "default" : "pointer", textAlign: "left",
                 border: `2px solid ${pub?.name === name ? C.green : C.line}`, background: pub?.name === name ? "#123A28" : C.panelHi,
-                color: C.ink, fontFamily: "'Rubik', sans-serif", fontSize: 15, fontWeight: 700, touchAction: "manipulation", opacity: refuses ? 0.5 : 1,
+                color: C.ink, fontFamily: "'Rubik', sans-serif", fontSize: 15, fontWeight: 700, touchAction: "manipulation", opacity: off ? 0.5 : 1,
               }}>
-                📮 {name} <span style={{ fontSize: 11, color: rel >= 65 ? C.gold : rel >= 40 ? C.dim : C.red }}>rel {Math.round(rel)}</span>
+                📮 {name} <span style={{ fontSize: 11, color: C.cyan }}>{pb.tier}</span> <span style={{ fontSize: 11, color: rel >= 65 ? C.gold : rel >= 40 ? C.dim : C.red }}>rel {Math.round(rel)}</span>
                 <div style={{ fontSize: 12, color: C.dim, fontWeight: 400, marginTop: 2 }}>
                   {refuses
                     ? "Won't work with you after last time."
-                    : `Advance ${money$(terms.advance)} · reach ~${(terms.floor / 1000).toFixed(0)}K fans · you keep 35% · score guarantee: 55+`}
-                  {!refuses && outgrown && <span style={{ color: C.gold, fontWeight: 700 }}> · Your fans exceed their reach — you don't need them anymore.</span>}
+                    : locked
+                    ? `Only signs proven studios — reputation ${pb.minRep}+ required (yours: ${Math.round(s.rep ?? 50)}).`
+                    : `Advance ${money$(terms.advance)} · reach ~${(terms.floor / 1000).toFixed(0)}K fans · you keep ${Math.round(pb.share * 100)}% · ${pb.guarantee ? `score guarantee: ${pb.guarantee}+` : "no score guarantee"}`}
+                  {!off && outgrown && <span style={{ color: C.gold, fontWeight: 700 }}> · Your fans exceed their reach — you don't need them anymore.</span>}
                 </div>
               </button>
             );
@@ -4120,7 +4144,7 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, se
               );
             })()}
             {(() => {
-              const deal = pub ? pubDealTerms(pub.name, s.publishers?.[pub.name]?.rel ?? 50, devCost, pub.keepIp) : null;
+              const deal = pub ? pubDealTerms(pubByName(pub.name), s.publishers?.[pub.name]?.rel ?? 50, devCost, pub.keepIp) : null;
               const net = cost - (deal?.advance || 0);
               return (
                 <>
@@ -4142,7 +4166,7 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, se
               );
             })()}
           </div>
-          <Btn color={C.green} disabled={!canStart} onClick={() => startProject({ ...draft, team, pubDeal: pub ? pubDealTerms(pub.name, s.publishers?.[pub.name]?.rel ?? 50, devCost, pub.keepIp) : null })}>
+          <Btn color={C.green} disabled={!canStart} onClick={() => startProject({ ...draft, team, pubDeal: pub ? pubDealTerms(pubByName(pub.name), s.publishers?.[pub.name]?.rel ?? 50, devCost, pub.keepIp) : null })}>
             🎮 Start development {twoTeams ? `(Team ${team})` : ""}
           </Btn>
         </div>
