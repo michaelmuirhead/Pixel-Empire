@@ -395,6 +395,24 @@ const money$ = n => (n < 0 ? "-$" : "$") + Math.abs(Math.round(n)).toLocaleStrin
 const yearOf = wk => 1984 + Math.floor(wk / 52);
 const weekOf = wk => (wk % 52) + 1;
 
+// ---------- ANNUAL LEDGER ----------
+// Money in and out is filed under a stream as it moves, so the year can close
+// its books with a real income statement. Anything not filed (random events,
+// one-off windfalls) lands on the "Events & other" line, which is derived from
+// the actual cash delta so the statement always reconciles.
+const REV_LABELS = {
+  sales: "Game sales", funding: "Advances & funding", contracts: "Contract work",
+  engine: "Engine licensing", label: "Publishing label", subs: "Subsidiaries",
+  ip: "IP sales", merch: "Merch", loan: "Loans & bailouts",
+};
+const EXP_LABELS = {
+  payroll: "Salaries & rent", dev: "Development & engines", marketing: "Marketing & events",
+  liveops: "Live ops & servers", hiring: "Recruiting", label: "Publishing label",
+  biz: "Deals & acquisitions", loan: "Loan payments",
+};
+const ysAdd = (ys, kind, key, amt) => !ys || !amt ? ys
+  : { ...ys, [kind]: { ...(ys[kind] || {}), [key]: ((ys[kind] || {})[key] || 0) + amt } };
+
 function pushLog(s, msg) {
   return [{ wk: s.week, msg }, ...s.log].slice(0, 40);
 }
@@ -437,8 +455,9 @@ function freshState(studioName, founder) {
     candidates: [],
     project: null,
     projectB: null,
-    yearStats: { revenue: 0, lastRevenue: 0, fansStart: 0, repStart: 50, topRival: null },
+    yearStats: { revenue: 0, lastRevenue: 0, fansStart: 0, repStart: 50, topRival: null, cashStart: 20000, rev: {}, exp: {} },
     yearReview: null,
+    ledger: [],
     released: [],
     ips: {},        // IP you own
     market: [],     // IP currently for sale
@@ -682,6 +701,8 @@ async function loadGame() {
     }
     if (!s.yearStats) s.yearStats = { revenue: 0, lastRevenue: 0, fansStart: s.fans, repStart: s.rep ?? 50, topRival: null };
     if (s.yearReview === undefined) s.yearReview = null;
+    if (s.yearStats.cashStart === undefined) s.yearStats = { ...s.yearStats, cashStart: s.money, rev: {}, exp: {} };
+    if (!s.ledger) s.ledger = [];
     s.staff = s.staff.map(m => m.team ? m : { ...m, team: "A" });
     if (!s.rivals) {                             // migrate to persistent rival studios
       s.rivals = seedRivals(s.week);
@@ -910,6 +931,7 @@ function simulateRivals(s, year) {
         const payout = Math.round(Math.pow(score / 10, 2.4) * 150);
         s.money += payout;
         if (s.yearStats) s.yearStats = { ...s.yearStats, revenue: (s.yearStats.revenue || 0) + payout, subShips: [...(s.yearStats.subShips || []), score] };
+        s.yearStats = ysAdd(s.yearStats, "rev", "subs", payout);
         s.log = pushLog(s, `🏢 Your subsidiary ${r.name} shipped "${title}" (${score}/100) — ${money$(payout)} flows up to the parent company.`);
       }
       // Rivals chase trends too: genre trends match directly, topic trends 30% of the time
@@ -1262,10 +1284,12 @@ function tick(prev) {
   const salaries = s.staff.reduce((a, m) => a + m.salary, 0);
   const rent = OFFICES[s.office].rent;
   s.money -= salaries + rent;
+  s.yearStats = ysAdd(s.yearStats, "exp", "payroll", salaries + rent);
 
   // Loan repayment
   if (s.loan) {
     s.money -= s.loan.weekly;
+    s.yearStats = ysAdd(s.yearStats, "exp", "loan", s.loan.weekly);
     const weeksLeft = s.loan.weeksLeft - 1;
     if (weeksLeft <= 0) {
       s.loan = null;
@@ -1368,6 +1392,7 @@ function tick(prev) {
       const payMult = 1 + ((s.rep ?? 50) - 50) / 200; // reputation moves the invoice ±25%
       const paid = Math.round(c.pay * payMult);
       s.money += paid;
+      s.yearStats = ysAdd(s.yearStats, "rev", "contracts", paid);
       s.rp += c.rp;
       s.rep = Math.min(100, (s.rep ?? 50) + 1);
       s.morale = Math.min(100, s.morale + 2);
@@ -1385,7 +1410,12 @@ function tick(prev) {
   }
 
   // Sales on released games + live-service revenue
-  let weekRevenue = 0;
+  let weekRevenue = 0, serverBills = 0;
+  // Every earning week is recorded on the game so the shelf can chart it
+  const withHistory = (gm, rev, units) => [
+    ...(gm.salesHistory || []),
+    { w: (gm.salesHistory?.length || 0) + 1, rev: Math.round(rev), units },
+  ].slice(-312);
   s.released = s.released.map(gm => {
     if (gm.mmo) {
       if (gm.sunset) return gm;
@@ -1398,7 +1428,8 @@ function tick(prev) {
       const rev = (gm.subs || 0) * 0.25 * rnd(0.9, 1.1);
       const serverCost = (gm.serverBase || 0) + (gm.subs || 0) * 0.10;
       const net = rev - serverCost;
-      weekRevenue += net;
+      weekRevenue += rev;
+      serverBills += serverCost;
       if (net < 0 && !gm.bleeding) s.log = pushLog(s, `🩸 "${gm.name}" is losing money — server bills now outrun subscriptions. Ship an expansion or sunset it.`);
       const grown = health >= 70
         ? Math.min(gm.subCap || Infinity, (gm.subs || 0) * 1.02)
@@ -1409,6 +1440,7 @@ function tick(prev) {
         subs: Math.max(0, Math.round(grown * rnd(0.99, 1.01))),
         health: Math.max(0, health - 2),
         salesTotal: gm.salesTotal + rev,
+        salesHistory: withHistory(gm, rev, gm.subs || 0),
         bleeding: net < 0,
       };
     }
@@ -1423,22 +1455,33 @@ function tick(prev) {
       const rev = gm.weeklyBase * 0.45 * ((gm.health ?? 100) / 100) * rnd(0.85, 1.15);
       weekRevenue += rev;
       if (Math.random() < 0.3) s.fans += ri(1, 8);
-      return { ...gm, health: Math.max(0, (gm.health ?? 100) - 1.2), salesTotal: gm.salesTotal + rev };
+      return { ...gm, health: Math.max(0, (gm.health ?? 100) - 1.2), salesTotal: gm.salesTotal + rev, salesHistory: withHistory(gm, rev, null) };
     }
     if (gm.weeksLeft <= 0) return gm;
     const decay = gm.weeksLeft / gm.weeksTotal;
     const rev = gm.weeklyBase * decay * rnd(0.8, 1.2);
     weekRevenue += rev;
-    return { ...gm, weeksLeft: gm.weeksLeft - 1, salesTotal: gm.salesTotal + rev };
+    const units = gm.unitPrice ? Math.round(rev / gm.unitPrice) : null;
+    return {
+      ...gm, weeksLeft: gm.weeksLeft - 1, salesTotal: gm.salesTotal + rev,
+      unitsTotal: (gm.unitsTotal || 0) + (units || 0),
+      salesHistory: withHistory(gm, rev, units),
+    };
   });
-  s.money += weekRevenue;
+  s.money += weekRevenue - serverBills;
   if (s.yearStats) s.yearStats = { ...s.yearStats, revenue: (s.yearStats.revenue || 0) + weekRevenue };
+  s.yearStats = ysAdd(s.yearStats, "rev", "sales", weekRevenue);
+  s.yearStats = ysAdd(s.yearStats, "exp", "liveops", serverBills);
 
   // Morale drift
   s.morale = Math.max(30, Math.min(100, s.morale + rnd(-1, 1)));
 
   // Merch keeps the lights on; the community team keeps the fans warm
-  if (s.tech.includes("merch")) s.money += Math.round(s.fans * 0.02);
+  if (s.tech.includes("merch")) {
+    const merchIncome = Math.round(s.fans * 0.02);
+    s.money += merchIncome;
+    s.yearStats = ysAdd(s.yearStats, "rev", "merch", merchIncome);
+  }
   if (s.tech.includes("community")) s.fans += Math.round(5 + s.fans * 0.001);
 
   // --- Engine licensing economy ---
@@ -1465,6 +1508,7 @@ function tick(prev) {
   });
   if (royaltyTotal > 0) {
     s.money += royaltyTotal;
+    s.yearStats = ysAdd(s.yearStats, "rev", "engine", royaltyTotal);
     if (s.yearStats) s.yearStats = { ...s.yearStats, revenue: (s.yearStats.revenue || 0) + royaltyTotal };
   }
 
@@ -1481,6 +1525,7 @@ function tick(prev) {
     if (divTotal !== 0) {
       s.money += divTotal;
       if (divTotal > 0 && s.yearStats) s.yearStats = { ...s.yearStats, revenue: (s.yearStats.revenue || 0) + divTotal };
+      s.yearStats = divTotal > 0 ? ysAdd(s.yearStats, "rev", "subs", divTotal) : ysAdd(s.yearStats, "exp", "biz", -divTotal);
     }
   }
 
@@ -1510,6 +1555,7 @@ function tick(prev) {
       s.money += revenue;
       s.fans += score * 30;
       if (s.yearStats) s.yearStats = { ...s.yearStats, revenue: (s.yearStats.revenue || 0) + revenue, labelShips: [...(s.yearStats.labelShips || []), score] };
+      s.yearStats = ysAdd(s.yearStats, "rev", "label", revenue);
       let repD = 0;
       if (score >= 75) repD = 2; else if (score < 45) repD = -2;
       s.rep = Math.max(0, Math.min(100, (s.rep ?? 50) + repD));
@@ -1629,6 +1675,17 @@ function tick(prev) {
     const ys = s.yearStats || { revenue: 0, fansStart: 0, repStart: 50, topRival: null, lastRevenue: 0 };
     const yearGames = s.released.filter(g => g.year === prevYear);
     const bestGame = yearGames.length ? yearGames.reduce((a, b) => (b.score > a.score ? b : a)) : null;
+    // Close the books: total the tracked streams, derive the untracked
+    // remainder from the real cash delta so the statement reconciles.
+    const totalRev = Math.round(Object.values(ys.rev || {}).reduce((a, b) => a + b, 0));
+    const totalExp = Math.round(Object.values(ys.exp || {}).reduce((a, b) => a + b, 0));
+    const other = Math.round((s.money - (ys.cashStart ?? s.money)) - (totalRev - totalExp));
+    const statement = {
+      year: prevYear, rev: ys.rev || {}, exp: ys.exp || {}, other,
+      revenue: totalRev, expenses: totalExp, net: totalRev - totalExp + other,
+      cashStart: Math.round(ys.cashStart ?? s.money), cashEnd: Math.round(s.money),
+    };
+    s.ledger = [...(s.ledger || []), statement].slice(-60);
     s.yearReview = {
       year: prevYear,
       revenue: Math.round(ys.revenue || 0),
@@ -1639,8 +1696,9 @@ function tick(prev) {
       fansGained: s.fans - (ys.fansStart ?? s.fans),
       repDelta: Math.round((s.rep ?? 50) - (ys.repStart ?? 50)),
       topRival: ys.topRival || null,
+      statement,
     };
-    s.yearStats = { revenue: 0, lastRevenue: ys.revenue || 0, fansStart: s.fans, repStart: s.rep ?? 50, topRival: null };
+    s.yearStats = { revenue: 0, lastRevenue: ys.revenue || 0, fansStart: s.fans, repStart: s.rep ?? 50, topRival: null, cashStart: s.money, rev: {}, exp: {} };
   }
   // PixelCon rolls into town mid-year
   if (wkOfYear === 25 && !s.convention) {
@@ -1809,6 +1867,7 @@ export default function PixelEmpire() {
     return {
       ...prev,
       money: prev.money - signing,
+      yearStats: ysAdd(prev.yearStats, "exp", "hiring", signing),
       staff: [...prev.staff, { ...cand, team }],
       candidates: prev.candidates.filter(c => c.id !== cand.id),
       log: pushLog(prev, `Hired ${cand.name} (${cand.role}) — signing bonus ${money$(signing)}.${prev.office >= 3 ? ` Assigned to Team ${team}.` : ""}`),
@@ -1835,7 +1894,7 @@ export default function PixelEmpire() {
   const upgradeOffice = () => update(prev => {
     const next = OFFICES[prev.office + 1];
     if (!next || prev.money < next.cost) return prev;
-    return { ...prev, money: prev.money - next.cost, office: prev.office + 1, log: pushLog(prev, `Moved into the ${next.name}! Room for ${next.cap} people.`) };
+    return { ...prev, money: prev.money - next.cost, yearStats: ysAdd(prev.yearStats, "exp", "biz", next.cost), office: prev.office + 1, log: pushLog(prev, `Moved into the ${next.name}! Room for ${next.cap} people.`) };
   });
 
 const slotOf = team => (team === "B" ? "projectB" : "project");
@@ -1854,6 +1913,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
     return {
       ...prev,
       money: prev.money - cost + advance + exclFund,
+      yearStats: ysAdd(ysAdd(prev.yearStats, "exp", "dev", cost), "rev", "funding", advance + exclFund),
       tab: "dev",
       [slot]: (() => {
         const totalWork = Math.round(size.weeks * workScale(plat.tech) * (draft.remakeOf?.mode === "remaster" ? 0.45 : 1));
@@ -1880,6 +1940,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
     return {
       ...prev,
       money: prev.money - 1500,
+      yearStats: ysAdd(prev.yearStats, "exp", "marketing", 1500),
       [slot]: { ...prev[slot], hype: Math.min(100, (prev[slot].hype || 0) + boost) },
       log: pushLog(prev, `Marketing push! Hype +${boost}.`),
     };
@@ -1935,6 +1996,13 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
       quote: pick(score >= 75 ? QUOTES.hi : score >= 50 ? QUOTES.mid : QUOTES.lo),
     }));
     const eng = resolveEngine(prev, p.engine);
+    // Copies move at a per-unit price set by the pricing model. A publisher
+    // deal divides your revenue cut, not the copies — so the divisor shrinks
+    // with your share and units still reflect real sales.
+    const unitPrice = (biz
+      ? (biz.id === "ads" ? 0.4 : biz.id === "iap" ? 1.5 : 6)
+      : (priceTier.id === "budget" ? 25 : priceTier.id === "premium" ? 65 : 45))
+      * (p.pubDeal ? p.pubDeal.share : 1);
     const rec = {
       id: Math.random().toString(36).slice(2),
       name: p.name, genre: p.genre, topic: p.topic, platform: p.platform,
@@ -1943,6 +2011,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
       exclusive: p.exclusive ? platById(p.platform)?.holder || true : false,
       remake: !!p.remakeOf,
       score, salesTotal: 0, weeklyBase, weeksLeft, weeksTotal: weeksLeft,
+      unitPrice, unitsTotal: 0, salesHistory: [],
       year: yearOf(prev.week),
       hue: ri(0, 360),
     };
@@ -2081,6 +2150,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
       publishers,
       pubIps: (typeof pubKeptIp !== "undefined" && pubKeptIp) ? [...(prev.pubIps || []), pubKeptIp] : (prev.pubIps || []),
       money: prev.money - clawback + launchBonus,
+      yearStats: ysAdd(ysAdd(prev.yearStats, "exp", "biz", clawback), "rev", "funding", launchBonus),
       holders,
       [slot]: null,
       released: [rec, ...prev.released],
@@ -2121,6 +2191,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
       ...prev,
       convention: null,
       money: prev.money - tier.cost,
+      yearStats: ysAdd(prev.yearStats, "exp", "marketing", tier.cost),
       fans: prev.fans + tier.fansFlat + Math.round(prev.fans * tier.fansPct),
       rp: prev.rp + tier.rp,
       rep: Math.min(100, (prev.rep ?? 50) + (tier.id === "keynote" ? 2 : 0)),
@@ -2174,6 +2245,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
     return {
       ...prev,
       money: prev.money - cost,
+      yearStats: ysAdd(prev.yearStats, "exp", "hiring", cost),
       candidates: [...fresh, ...prev.candidates].slice(0, 6),
       log: pushLog(prev, `Posted a job ad (${money$(cost)}) — three applicants responded.`),
     };
@@ -2194,6 +2266,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
     return {
       ...prev,
       money: prev.money - cost,
+      yearStats: ysAdd(prev.yearStats, "exp", "hiring", cost),
       candidates: [senior(), senior(), ...prev.candidates].slice(0, 6),
       log: pushLog(prev, `The headhunter (${money$(cost)}) came back with two senior candidates.`),
     };
@@ -2218,6 +2291,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
     return {
       ...prev,
       money: prev.money - cost,
+      yearStats: ysAdd(prev.yearStats, "exp", "hiring", cost),
       candidates: [c, ...prev.candidates].slice(0, 6),
       rivals: { ...prev.rivals, [rivalId]: { ...r, prestige: Math.max(0, r.prestige - 150) } },
       log: pushLog(prev, `🕵 Poached ${c.name} out of ${r.name} for ${money$(cost)}. They're in your applicant pool — and ${r.name} noticed.`),
@@ -2248,6 +2322,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
     return {
       ...prev,
       money: prev.money - cost,
+      yearStats: ysAdd(prev.yearStats, "exp", "liveops", cost),
       released: prev.released.map(x => x.id === gameId ? { ...x, health: Math.min(100, (x.health ?? 0) + 30) } : x),
       log: pushLog(prev, `🌐 Content update shipped for "${g.name}" — the player base is buzzing again.`),
     };
@@ -2272,6 +2347,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
     return {
       ...prev,
       money: prev.money - cost,
+      yearStats: ysAdd(prev.yearStats, "exp", "liveops", cost),
       released: prev.released.map(x => x.id === gameId
         ? { ...x, health: Math.min(100, (x.health ?? 0) + 45), subs: Math.min(x.subCap || Infinity, Math.round((x.subs || 0) * 1.35)), bleeding: false }
         : x),
@@ -2301,6 +2377,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
       name: `${g.name} (${target.name})`,
       platform: platId, port: true, portedTo: undefined, rereleased: true, goty: false,
       weeklyBase: portWeekly, weeksLeft: weeks, weeksTotal: weeks, salesTotal: 0,
+      unitsTotal: 0, salesHistory: [],
       year: year2, live: false, health: undefined, sunset: undefined,
     };
     // Holder likes seeing your catalog arrive
@@ -2312,6 +2389,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
     return {
       ...prev,
       money: prev.money - cost,
+      yearStats: ysAdd(prev.yearStats, "exp", "dev", cost),
       holders,
       released: [rec, ...prev.released.map(x => x.id === gameId ? { ...x, portedTo: [...(x.portedTo || []), platId] } : x)],
       log: pushLog(prev, `🔀 Ported "${g.name}" to the ${target.name} for ${money$(cost)} — a fresh audience, a fresh tail.`),
@@ -2326,6 +2404,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
     return {
       ...prev,
       money: prev.money - cost,
+      yearStats: ysAdd(prev.yearStats, "exp", "dev", cost),
       fans: prev.fans + 100,
       released: prev.released.map(x => x.id === gameId
         ? { ...x, rereleased: true, weeksLeft: 8, weeksTotal: 8, weeklyBase: x.weeklyBase * 0.35 }
@@ -2355,6 +2434,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
     return {
       ...prev,
       money: prev.money - cost,
+      yearStats: ysAdd(prev.yearStats, "exp", "dev", cost),
       engines: [...prev.engines, eng],
       log: pushLog(prev, `🔧 Built ${clean} v1 for ${money$(cost)} — power ${power}. Select it when greenlighting a game.`),
     };
@@ -2371,6 +2451,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
     return {
       ...prev,
       money: prev.money - cost,
+      yearStats: ysAdd(prev.yearStats, "exp", "dev", cost),
       engines: prev.engines.map(x => x.id === engineId
         ? { ...x, parts: [...x.parts, ...newParts], version: x.version + 1 }
         : x),
@@ -2396,6 +2477,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
     return {
       ...prev,
       money: prev.money - offer.upfront,
+      yearStats: ysAdd(prev.yearStats, "exp", "dev", offer.upfront),
       licensedEngines: [...prev.licensedEngines, offer],
       engineMarket: prev.engineMarket.filter(o => o.id !== offer.id),
       log: pushLog(prev, `🔧 Licensed ${offer.name} from ${offer.owner} for ${money$(offer.upfront)} — ${money$(offer.perGame)} per game built on it.`),
@@ -2407,6 +2489,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
     return {
       ...prev,
       money: prev.money + prev.bankOffer.bail,
+      yearStats: ysAdd(prev.yearStats, "rev", "loan", prev.bankOffer.bail),
       loan: { weekly: prev.bankOffer.weekly, weeksLeft: 52 },
       loanUsed: true,
       bankOffer: null,
@@ -2463,6 +2546,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
       ...prev,
       ips,
       money: prev.money + proceeds,
+      yearStats: ysAdd(prev.yearStats, "rev", "ip", proceeds),
       rivals: { ...prev.rivals, [buyer.id]: { ...buyer, ips: [...buyer.ips, soldIp] } },
       log: pushLog(prev, `💰 Sold the "${ip.name}" IP to ${buyer.name} (${trajectoryOf(buyer)} studio) for ${money$(proceeds)}. Keep an eye out — it may come back on the market.`),
     };
@@ -2480,6 +2564,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
     return {
       ...prev,
       money: prev.money - paid,
+      yearStats: ysAdd(prev.yearStats, "exp", "biz", paid),
       ips: { ...prev.ips, [ip.id]: ip },
       rivals,
       market: prev.market.filter(m => m.ip.id !== listing.ip.id),
@@ -2544,6 +2629,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
     return {
       ...prev,
       money: prev.money - price,
+      yearStats: ysAdd(prev.yearStats, "exp", "biz", price),
       ips: { ...prev.ips, [ip.id]: ip },
       pubIps: prev.pubIps.filter(x => x.id !== pubIpId),
       log: pushLog(prev, `🤝 Bought "${ip.name}" back from ${held.publisher} for ${money$(price)}. Expensive lesson — but it's yours now.`),
@@ -2556,6 +2642,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
     return {
       ...prev,
       money: prev.money - pitch.ask,
+      yearStats: ysAdd(prev.yearStats, "exp", "label", pitch.ask),
       pitches: prev.pitches.filter(x => x.id !== pitch.id),
       pubProjects: [...(prev.pubProjects || []), { ...pitch, title, done: prev.week + pitch.weeks }],
       log: pushLog(prev, `📮 Deal signed: funding ${pitch.studio}'s "${title}" (${pitch.concept}) for ${money$(pitch.ask)}. Shipping in ~${pitch.weeks} weeks under your label.`),
@@ -2579,6 +2666,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
     return {
       ...prev,
       money: prev.money - paid,
+      yearStats: ysAdd(prev.yearStats, "exp", "biz", paid),
       rep: Math.min(100, (prev.rep ?? 50) + 2),
       acqTalks: null, acqWar: null,
       rivals: { ...prev.rivals, [rivalId]: { ...r, ownedByYou: true } },
@@ -2655,6 +2743,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
     return {
       ...prev,
       money: prev.money - 5000,
+      yearStats: ysAdd(prev.yearStats, "exp", "biz", 5000),
       rivals: { ...prev.rivals, [rivalId]: { ...r, orderedSequel: true, nextRelease: Math.min(r.nextRelease, prev.week + 8) } },
       log: pushLog(prev, `📋 Directive sent: ${r.name} will fast-track a sequel in their strongest IP.`),
     };
@@ -2666,6 +2755,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
     return {
       ...prev,
       money: prev.money - 15000,
+      yearStats: ysAdd(prev.yearStats, "exp", "biz", 15000),
       rivals: { ...prev.rivals, [rivalId]: { ...r, momentum: Math.min(1, r.momentum + 0.4), skill: Math.min(90, r.skill + 2) } },
       log: pushLog(prev, `💉 Injected $15,000 into ${r.name} — new hires, new hardware, new momentum.`),
     };
@@ -2709,6 +2799,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
     return {
       ...prev,
       money: prev.money + price,
+      yearStats: ysAdd(prev.yearStats, "rev", "subs", price),
       rivals: { ...prev.rivals, [rivalId]: { ...r, ownedByYou: false, noTalksUntil: prev.week + 26 } },
       log: pushLog(prev, `💰 Spun off ${r.name} for ${money$(price)}. They're independent again.`),
     };
@@ -3102,6 +3193,12 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
           <Row k="Awards won" v={s.yearReview.awardsWon ? `🏆 ${s.yearReview.awardsWon}` : "—"} color={C.gold} />
           <Row k="Fans gained" v={s.yearReview.fansGained.toLocaleString()} color={C.cyan} />
           <Row k="Reputation" v={`${s.yearReview.repDelta >= 0 ? "+" : ""}${s.yearReview.repDelta}`} color={s.yearReview.repDelta >= 0 ? C.green : C.red} />
+          {s.yearReview.statement && (
+            <>
+              <div style={{ fontSize: 12, color: C.dim, letterSpacing: 1, marginTop: 10 }}>📒 INCOME STATEMENT</div>
+              <StatementView st={s.yearReview.statement} />
+            </>
+          )}
           {s.yearReview.topRival && (
             <div style={{ marginTop: 10, padding: "10px 14px", background: C.panel, borderRadius: 12, fontSize: 14 }}>
               🏢 <b>Rival of the year:</b> {s.yearReview.topRival.studio} — "{s.yearReview.topRival.game}" ({s.yearReview.topRival.score}/100)
@@ -3307,6 +3404,31 @@ function Row({ k, v, color }) {
     <div style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", fontSize: 16 }}>
       <span style={{ color: C.dim }}>{k}</span>
       <span style={{ fontWeight: 700, color: color || C.ink }}>{v}</span>
+    </div>
+  );
+}
+
+// Income statement for one closed year — used by the Year in Review and the
+// Annual Report browser in Analytics.
+function StatementView({ st }) {
+  const line = (label, v, color) => (
+    <div key={label} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 14 }}>
+      <span style={{ color: C.dim }}>{label}</span>
+      <b style={{ color }}>{money$(v)}</b>
+    </div>
+  );
+  return (
+    <div style={{ background: C.panelHi, borderRadius: 12, padding: "10px 14px", margin: "10px 0" }}>
+      <div style={{ fontSize: 12, color: C.dim, letterSpacing: 1, marginBottom: 4 }}>REVENUE — <b style={{ color: C.green }}>{money$(st.revenue)}</b></div>
+      {Object.keys(REV_LABELS).filter(k => Math.round(st.rev?.[k] || 0)).map(k => line(REV_LABELS[k], Math.round(st.rev[k]), C.green))}
+      <div style={{ fontSize: 12, color: C.dim, letterSpacing: 1, margin: "8px 0 4px" }}>EXPENSES — <b style={{ color: C.red }}>{money$(st.expenses)}</b></div>
+      {Object.keys(EXP_LABELS).filter(k => Math.round(st.exp?.[k] || 0)).map(k => line(EXP_LABELS[k], Math.round(st.exp[k]), C.red))}
+      {Math.abs(st.other) > 2 && line("Events & other (net)", st.other, st.other >= 0 ? C.green : C.red)}
+      <div style={{ borderTop: `1px solid ${C.line}`, marginTop: 8, paddingTop: 8, display: "flex", justifyContent: "space-between", fontSize: 15 }}>
+        <b>Net {st.net >= 0 ? "profit" : "loss"}</b>
+        <b style={{ fontFamily: "'Bungee', cursive", color: st.net >= 0 ? C.green : C.red }}>{money$(st.net)}</b>
+      </div>
+      <div style={{ fontSize: 12, color: C.dim, marginTop: 4 }}>Cash: {money$(st.cashStart)} → {money$(st.cashEnd)}</div>
     </div>
   );
 }
@@ -4366,6 +4488,7 @@ function IpTab({ s, sellIp, buyIp, renameIp, buybackPubIp, openTalks, orderSeque
 }
 
 function StatsTab({ s }) {
+  const [ledgerYear, setLedgerYear] = useState(null);
   const fmtMoney = v => Math.abs(v) >= 1e6 ? `$${(v / 1e6).toFixed(1)}M` : Math.abs(v) >= 1e3 ? `$${Math.round(v / 1e3)}K` : `$${Math.round(v)}`;
   const fmtNum = v => v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${Math.round(v / 1e3)}K` : `${Math.round(v)}`;
   const tipStyle = { background: C.panelHi, border: `1px solid ${C.line}`, borderRadius: 10, color: C.ink, fontSize: 13 };
@@ -4496,6 +4619,37 @@ function StatsTab({ s }) {
         )}
       </div>
 
+      {(s.ledger || []).length > 0 && (() => {
+        const ledger = s.ledger;
+        const sel = ledger.find(l => l.year === ledgerYear) || ledger[ledger.length - 1];
+        return (
+          <Panel title="ANNUAL REPORT" accent={C.green}>
+            <div style={{ fontSize: 13, color: C.dim, marginBottom: 10 }}>The books, year by year. Pick a year to read its income statement.</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+              {[...ledger].reverse().slice(0, 14).map(l => (
+                <Btn key={l.year} small kind={sel?.year === l.year ? "solid" : "ghost"} color={l.net >= 0 ? C.green : C.red} onClick={() => setLedgerYear(l.year)}>
+                  {l.year}
+                </Btn>
+              ))}
+            </div>
+            {sel && <StatementView st={sel} />}
+            {ledger.length > 1 && (
+              <ResponsiveContainer width="100%" height={150}>
+                <BarChart data={ledger} margin={{ top: 4, right: 8, left: 4, bottom: 0 }}>
+                  <CartesianGrid stroke={C.line} strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="year" {...axis} />
+                  <YAxis {...axis} tickFormatter={fmtMoney} width={56} />
+                  <Tooltip contentStyle={tipStyle} formatter={v => [fmtMoney(v), "Net profit"]} />
+                  <Bar dataKey="net" radius={[4, 4, 0, 0]}>
+                    {ledger.map((l, i) => <Cell key={i} fill={l.net >= 0 ? C.green : C.red} />)}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </Panel>
+        );
+      })()}
+
       <Panel title="INDUSTRY CLOUT" accent={C.gold}>
         <div style={{ fontSize: 13, color: C.dim, marginBottom: 8 }}>Your fanbase vs. every active studio's prestige. Climb the chart.</div>
         <ResponsiveContainer width="100%" height={Math.max(200, clout.length * 34)}>
@@ -4604,7 +4758,14 @@ function ShelfTab({ s, rerelease, portGame, liveUpdate, sunsetLive, shipExpansio
                 )}
                 {g.rereleased && <div style={{ fontSize: 11, fontWeight: 800, color: "#fff", marginBottom: 6, textShadow: "1px 1px 0 #0006" }}>💿 GREATEST HITS</div>}
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
-                  <div style={{ fontSize: 13, fontWeight: 800, color: "#fff", textShadow: "1px 1px 0 #0006" }}>{money$(g.salesTotal)}</div>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: "#fff", textShadow: "1px 1px 0 #0006" }}>{money$(g.salesTotal)}</div>
+                    {!g.mmo && (g.unitsTotal || 0) > 0 && (
+                      <div style={{ fontSize: 10, fontWeight: 800, color: "#ffffffcc", textShadow: "1px 1px 0 #0006" }}>
+                        {(g.unitsTotal >= 1e6 ? `${(g.unitsTotal / 1e6).toFixed(1)}M` : g.unitsTotal >= 1e3 ? `${Math.round(g.unitsTotal / 1e3)}K` : g.unitsTotal)} {g.biz && g.biz !== "premium" ? "downloads" : "copies"}
+                      </div>
+                    )}
+                  </div>
                   <ScoreSticker score={g.score} size={46} />
                 </div>
               </div>
@@ -4650,6 +4811,12 @@ function ShelfTab({ s, rerelease, portGame, liveUpdate, sunsetLive, shipExpansio
                 {g.mmo && <Tag>🌍 {g.sunset ? "MMO · Sunset" : `MMO · ${(g.subs || 0).toLocaleString()} subs · ${Math.round(g.health ?? 0)}% health`}</Tag>}
               </div>
               <Row k="Lifetime revenue" v={money$(g.salesTotal)} color={C.green} />
+              {!g.mmo && (g.unitsTotal || 0) > 0 && (
+                <Row k={g.biz && g.biz !== "premium" ? "Downloads" : "Copies sold"} v={(g.unitsTotal || 0).toLocaleString()} color={C.cyan} />
+              )}
+              {g.mmo && (g.salesHistory || []).length > 0 && (
+                <Row k="Peak subscribers" v={Math.max(...(g.salesHistory || []).map(h => h.units || 0), g.subs || 0).toLocaleString()} color={C.cyan} />
+              )}
               {!g.port && !g.live && !g.exclusive && (() => {
                 const yr2 = yearOf(s.week);
                 const targets = PLATFORMS.filter(pp => pp.yr <= yr2 && platEnd(s, pp) >= yr2 && pp.id !== g.platform && !(g.portedTo || []).includes(pp.id));
@@ -4682,19 +4849,51 @@ function ShelfTab({ s, rerelease, portGame, liveUpdate, sunsetLive, shipExpansio
                   <div style={{ fontFamily: "'Bungee', cursive", fontSize: 17, color: r.score >= 75 ? C.gold : r.score >= 50 ? C.cyan : C.red }}>{r.score}</div>
                 </div>
               ))}
-              {!g.live && curve.length > 1 && (
-                <>
-                  <div style={{ fontSize: 12, color: C.dim, letterSpacing: 1, margin: "12px 0 4px" }}>ESTIMATED SALES CURVE</div>
-                  <ResponsiveContainer width="100%" height={120}>
-                    <LineChart data={curve} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
-                      <XAxis dataKey="w" stroke={C.dim} fontSize={10} tickLine={false} />
-                      <YAxis hide />
-                      <Tooltip contentStyle={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 10, color: C.ink, fontSize: 12 }} formatter={v => [money$(v), "Weekly"]} labelFormatter={v => `Week ${v}`} />
-                      <Line type="monotone" dataKey="rev" stroke={C.green} strokeWidth={2} dot={false} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </>
-              )}
+              {(() => {
+                const hist = g.salesHistory || [];
+                if (hist.length > 1) {
+                  const hasUnits = hist.some(h => h.units != null);
+                  const unitsName = g.mmo ? "Subscribers" : g.biz && g.biz !== "premium" ? "Downloads" : "Copies";
+                  const stillEarning = g.live ? !g.sunset : g.weeksLeft > 0;
+                  return (
+                    <>
+                      <div style={{ fontSize: 12, color: C.dim, letterSpacing: 1, margin: "12px 0 4px" }}>
+                        WEEKLY SALES{stillEarning ? " · STILL EARNING" : ""}
+                        {hasUnits && <span> — <span style={{ color: C.green }}>revenue</span> / <span style={{ color: C.cyan }}>{unitsName.toLowerCase()}</span></span>}
+                      </div>
+                      <ResponsiveContainer width="100%" height={130}>
+                        <LineChart data={hist} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
+                          <XAxis dataKey="w" stroke={C.dim} fontSize={10} tickLine={false} />
+                          <YAxis yAxisId="r" hide />
+                          {hasUnits && <YAxis yAxisId="u" orientation="right" hide />}
+                          <Tooltip
+                            contentStyle={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 10, color: C.ink, fontSize: 12 }}
+                            formatter={(v, k) => [k === "rev" ? money$(v) : Math.round(v).toLocaleString(), k === "rev" ? "Revenue" : unitsName]}
+                            labelFormatter={v => `Week ${v}`}
+                          />
+                          <Line yAxisId="r" type="monotone" dataKey="rev" stroke={C.green} strokeWidth={2} dot={false} />
+                          {hasUnits && <Line yAxisId="u" type="monotone" dataKey="units" stroke={C.cyan} strokeWidth={2} dot={false} />}
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </>
+                  );
+                }
+                // Older releases predate week-by-week tracking — show the old estimate
+                if (!g.live && curve.length > 1) return (
+                  <>
+                    <div style={{ fontSize: 12, color: C.dim, letterSpacing: 1, margin: "12px 0 4px" }}>ESTIMATED SALES CURVE</div>
+                    <ResponsiveContainer width="100%" height={120}>
+                      <LineChart data={curve} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
+                        <XAxis dataKey="w" stroke={C.dim} fontSize={10} tickLine={false} />
+                        <YAxis hide />
+                        <Tooltip contentStyle={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 10, color: C.ink, fontSize: 12 }} formatter={v => [money$(v), "Weekly"]} labelFormatter={v => `Week ${v}`} />
+                        <Line type="monotone" dataKey="rev" stroke={C.green} strokeWidth={2} dot={false} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </>
+                );
+                return null;
+              })()}
               <Btn kind="ghost" onClick={() => setDetail(null)} style={{ width: "100%", marginTop: 12 }}>Close</Btn>
             </div>
           </div>
