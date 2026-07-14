@@ -1386,6 +1386,11 @@ function tick(prev) {
 
   // Sales on released games + live-service revenue
   let weekRevenue = 0;
+  // Every earning week is recorded on the game so the shelf can chart it
+  const withHistory = (gm, rev, units) => [
+    ...(gm.salesHistory || []),
+    { w: (gm.salesHistory?.length || 0) + 1, rev: Math.round(rev), units },
+  ].slice(-312);
   s.released = s.released.map(gm => {
     if (gm.mmo) {
       if (gm.sunset) return gm;
@@ -1409,6 +1414,7 @@ function tick(prev) {
         subs: Math.max(0, Math.round(grown * rnd(0.99, 1.01))),
         health: Math.max(0, health - 2),
         salesTotal: gm.salesTotal + rev,
+        salesHistory: withHistory(gm, rev, gm.subs || 0),
         bleeding: net < 0,
       };
     }
@@ -1423,13 +1429,18 @@ function tick(prev) {
       const rev = gm.weeklyBase * 0.45 * ((gm.health ?? 100) / 100) * rnd(0.85, 1.15);
       weekRevenue += rev;
       if (Math.random() < 0.3) s.fans += ri(1, 8);
-      return { ...gm, health: Math.max(0, (gm.health ?? 100) - 1.2), salesTotal: gm.salesTotal + rev };
+      return { ...gm, health: Math.max(0, (gm.health ?? 100) - 1.2), salesTotal: gm.salesTotal + rev, salesHistory: withHistory(gm, rev, null) };
     }
     if (gm.weeksLeft <= 0) return gm;
     const decay = gm.weeksLeft / gm.weeksTotal;
     const rev = gm.weeklyBase * decay * rnd(0.8, 1.2);
     weekRevenue += rev;
-    return { ...gm, weeksLeft: gm.weeksLeft - 1, salesTotal: gm.salesTotal + rev };
+    const units = gm.unitPrice ? Math.round(rev / gm.unitPrice) : null;
+    return {
+      ...gm, weeksLeft: gm.weeksLeft - 1, salesTotal: gm.salesTotal + rev,
+      unitsTotal: (gm.unitsTotal || 0) + (units || 0),
+      salesHistory: withHistory(gm, rev, units),
+    };
   });
   s.money += weekRevenue;
   if (s.yearStats) s.yearStats = { ...s.yearStats, revenue: (s.yearStats.revenue || 0) + weekRevenue };
@@ -1935,6 +1946,13 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
       quote: pick(score >= 75 ? QUOTES.hi : score >= 50 ? QUOTES.mid : QUOTES.lo),
     }));
     const eng = resolveEngine(prev, p.engine);
+    // Copies move at a per-unit price set by the pricing model. A publisher
+    // deal divides your revenue cut, not the copies — so the divisor shrinks
+    // with your share and units still reflect real sales.
+    const unitPrice = (biz
+      ? (biz.id === "ads" ? 0.4 : biz.id === "iap" ? 1.5 : 6)
+      : (priceTier.id === "budget" ? 25 : priceTier.id === "premium" ? 65 : 45))
+      * (p.pubDeal ? p.pubDeal.share : 1);
     const rec = {
       id: Math.random().toString(36).slice(2),
       name: p.name, genre: p.genre, topic: p.topic, platform: p.platform,
@@ -1943,6 +1961,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
       exclusive: p.exclusive ? platById(p.platform)?.holder || true : false,
       remake: !!p.remakeOf,
       score, salesTotal: 0, weeklyBase, weeksLeft, weeksTotal: weeksLeft,
+      unitPrice, unitsTotal: 0, salesHistory: [],
       year: yearOf(prev.week),
       hue: ri(0, 360),
     };
@@ -2301,6 +2320,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
       name: `${g.name} (${target.name})`,
       platform: platId, port: true, portedTo: undefined, rereleased: true, goty: false,
       weeklyBase: portWeekly, weeksLeft: weeks, weeksTotal: weeks, salesTotal: 0,
+      unitsTotal: 0, salesHistory: [],
       year: year2, live: false, health: undefined, sunset: undefined,
     };
     // Holder likes seeing your catalog arrive
@@ -4604,7 +4624,14 @@ function ShelfTab({ s, rerelease, portGame, liveUpdate, sunsetLive, shipExpansio
                 )}
                 {g.rereleased && <div style={{ fontSize: 11, fontWeight: 800, color: "#fff", marginBottom: 6, textShadow: "1px 1px 0 #0006" }}>💿 GREATEST HITS</div>}
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
-                  <div style={{ fontSize: 13, fontWeight: 800, color: "#fff", textShadow: "1px 1px 0 #0006" }}>{money$(g.salesTotal)}</div>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: "#fff", textShadow: "1px 1px 0 #0006" }}>{money$(g.salesTotal)}</div>
+                    {!g.mmo && (g.unitsTotal || 0) > 0 && (
+                      <div style={{ fontSize: 10, fontWeight: 800, color: "#ffffffcc", textShadow: "1px 1px 0 #0006" }}>
+                        {(g.unitsTotal >= 1e6 ? `${(g.unitsTotal / 1e6).toFixed(1)}M` : g.unitsTotal >= 1e3 ? `${Math.round(g.unitsTotal / 1e3)}K` : g.unitsTotal)} {g.biz && g.biz !== "premium" ? "downloads" : "copies"}
+                      </div>
+                    )}
+                  </div>
                   <ScoreSticker score={g.score} size={46} />
                 </div>
               </div>
@@ -4650,6 +4677,12 @@ function ShelfTab({ s, rerelease, portGame, liveUpdate, sunsetLive, shipExpansio
                 {g.mmo && <Tag>🌍 {g.sunset ? "MMO · Sunset" : `MMO · ${(g.subs || 0).toLocaleString()} subs · ${Math.round(g.health ?? 0)}% health`}</Tag>}
               </div>
               <Row k="Lifetime revenue" v={money$(g.salesTotal)} color={C.green} />
+              {!g.mmo && (g.unitsTotal || 0) > 0 && (
+                <Row k={g.biz && g.biz !== "premium" ? "Downloads" : "Copies sold"} v={(g.unitsTotal || 0).toLocaleString()} color={C.cyan} />
+              )}
+              {g.mmo && (g.salesHistory || []).length > 0 && (
+                <Row k="Peak subscribers" v={Math.max(...(g.salesHistory || []).map(h => h.units || 0), g.subs || 0).toLocaleString()} color={C.cyan} />
+              )}
               {!g.port && !g.live && !g.exclusive && (() => {
                 const yr2 = yearOf(s.week);
                 const targets = PLATFORMS.filter(pp => pp.yr <= yr2 && platEnd(s, pp) >= yr2 && pp.id !== g.platform && !(g.portedTo || []).includes(pp.id));
@@ -4682,19 +4715,51 @@ function ShelfTab({ s, rerelease, portGame, liveUpdate, sunsetLive, shipExpansio
                   <div style={{ fontFamily: "'Bungee', cursive", fontSize: 17, color: r.score >= 75 ? C.gold : r.score >= 50 ? C.cyan : C.red }}>{r.score}</div>
                 </div>
               ))}
-              {!g.live && curve.length > 1 && (
-                <>
-                  <div style={{ fontSize: 12, color: C.dim, letterSpacing: 1, margin: "12px 0 4px" }}>ESTIMATED SALES CURVE</div>
-                  <ResponsiveContainer width="100%" height={120}>
-                    <LineChart data={curve} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
-                      <XAxis dataKey="w" stroke={C.dim} fontSize={10} tickLine={false} />
-                      <YAxis hide />
-                      <Tooltip contentStyle={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 10, color: C.ink, fontSize: 12 }} formatter={v => [money$(v), "Weekly"]} labelFormatter={v => `Week ${v}`} />
-                      <Line type="monotone" dataKey="rev" stroke={C.green} strokeWidth={2} dot={false} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </>
-              )}
+              {(() => {
+                const hist = g.salesHistory || [];
+                if (hist.length > 1) {
+                  const hasUnits = hist.some(h => h.units != null);
+                  const unitsName = g.mmo ? "Subscribers" : g.biz && g.biz !== "premium" ? "Downloads" : "Copies";
+                  const stillEarning = g.live ? !g.sunset : g.weeksLeft > 0;
+                  return (
+                    <>
+                      <div style={{ fontSize: 12, color: C.dim, letterSpacing: 1, margin: "12px 0 4px" }}>
+                        WEEKLY SALES{stillEarning ? " · STILL EARNING" : ""}
+                        {hasUnits && <span> — <span style={{ color: C.green }}>revenue</span> / <span style={{ color: C.cyan }}>{unitsName.toLowerCase()}</span></span>}
+                      </div>
+                      <ResponsiveContainer width="100%" height={130}>
+                        <LineChart data={hist} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
+                          <XAxis dataKey="w" stroke={C.dim} fontSize={10} tickLine={false} />
+                          <YAxis yAxisId="r" hide />
+                          {hasUnits && <YAxis yAxisId="u" orientation="right" hide />}
+                          <Tooltip
+                            contentStyle={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 10, color: C.ink, fontSize: 12 }}
+                            formatter={(v, k) => [k === "rev" ? money$(v) : Math.round(v).toLocaleString(), k === "rev" ? "Revenue" : unitsName]}
+                            labelFormatter={v => `Week ${v}`}
+                          />
+                          <Line yAxisId="r" type="monotone" dataKey="rev" stroke={C.green} strokeWidth={2} dot={false} />
+                          {hasUnits && <Line yAxisId="u" type="monotone" dataKey="units" stroke={C.cyan} strokeWidth={2} dot={false} />}
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </>
+                  );
+                }
+                // Older releases predate week-by-week tracking — show the old estimate
+                if (!g.live && curve.length > 1) return (
+                  <>
+                    <div style={{ fontSize: 12, color: C.dim, letterSpacing: 1, margin: "12px 0 4px" }}>ESTIMATED SALES CURVE</div>
+                    <ResponsiveContainer width="100%" height={120}>
+                      <LineChart data={curve} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
+                        <XAxis dataKey="w" stroke={C.dim} fontSize={10} tickLine={false} />
+                        <YAxis hide />
+                        <Tooltip contentStyle={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 10, color: C.ink, fontSize: 12 }} formatter={v => [money$(v), "Weekly"]} labelFormatter={v => `Week ${v}`} />
+                        <Line type="monotone" dataKey="rev" stroke={C.green} strokeWidth={2} dot={false} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </>
+                );
+                return null;
+              })()}
               <Btn kind="ghost" onClick={() => setDetail(null)} style={{ width: "100%", marginTop: 12 }}>Close</Btn>
             </div>
           </div>
