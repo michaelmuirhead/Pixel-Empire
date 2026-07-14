@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend, Cell } from "recharts";
 
 /* ============================================================
@@ -1138,28 +1138,31 @@ function simulateRivals(s, year) {
 
 // ---------- CONTRACTS ----------
 
-// Publishers differ in size and availability: boutiques take anyone and let
-// you keep more, majors and giants demand reputation and hits but bring huge
-// advances and reach. Some enter or fold as the timeline rolls on.
-//   share: the cut YOU keep · adv: advance as a multiple of dev cost
-//   reach/reachRel: fan floor their logo buys · guarantee: clawback below this
+// Publishers are distribution, nothing more: no advances. Strength is reach —
+// the fan floor their logo puts a game in front of — and stronger houses take
+// a deeper cut. They approach YOU when a game is ready to ship, and only if
+// it meets their criteria: genres they publish and the score bar their own
+// playtest of the finished build has to clear. Some enter or fold with time.
+//   share: the cut YOU keep · reach/reachRel: fan floor their logo buys
+//   minScore: their playtest bar · genres: what they publish (null = anything)
 const PUBLISHERS = [
-  { name: "Crescent Co.",          tier: "Boutique",     from: 1984,             share: 0.50, adv: 0.45, reach: 8000,  reachRel: 60,  guarantee: 0,  minRep: 0 },
-  { name: "Starcade Media",        tier: "Mid-size",     from: 1984, until: 2003, share: 0.35, adv: 0.85, reach: 18000, reachRel: 100, guarantee: 55, minRep: 30 },
-  { name: "Meridian Publishing",   tier: "Mid-size",     from: 1984,             share: 0.35, adv: 0.85, reach: 18000, reachRel: 100, guarantee: 55, minRep: 35 },
-  { name: "Vantage Bros.",         tier: "Major",        from: 1984,             share: 0.30, adv: 1.25, reach: 40000, reachRel: 180, guarantee: 60, minRep: 50 },
-  { name: "Titanwave Interactive", tier: "Global giant", from: 1996,             share: 0.25, adv: 1.90, reach: 85000, reachRel: 300, guarantee: 65, minRep: 65 },
-  { name: "Sprout Label",          tier: "Boutique",     from: 2005,             share: 0.55, adv: 0.40, reach: 12000, reachRel: 80,  guarantee: 0,  minRep: 0 },
-  { name: "Pocketworks",           tier: "Mid-size",     from: 2009,             share: 0.35, adv: 0.90, reach: 30000, reachRel: 140, guarantee: 50, minRep: 25 },
+  { name: "Crescent Co.",          tier: "Boutique",     from: 1984,              share: 0.50, reach: 8000,  reachRel: 60,  minScore: 0,  minRep: 0,  genres: null },
+  { name: "Starcade Media",        tier: "Mid-size",     from: 1984, until: 2003, share: 0.35, reach: 18000, reachRel: 100, minScore: 50, minRep: 30, genres: ["action", "platformer", "shooter", "racing"] },
+  { name: "Meridian Publishing",   tier: "Mid-size",     from: 1984,              share: 0.35, reach: 18000, reachRel: 100, minScore: 50, minRep: 35, genres: ["rpg", "adventure", "strategy", "sim"] },
+  { name: "Vantage Bros.",         tier: "Major",        from: 1984,              share: 0.30, reach: 40000, reachRel: 180, minScore: 62, minRep: 50, genres: null },
+  { name: "Titanwave Interactive", tier: "Global giant", from: 1996,              share: 0.25, reach: 85000, reachRel: 300, minScore: 75, minRep: 65, genres: null },
+  { name: "Sprout Label",          tier: "Boutique",     from: 2005,              share: 0.55, reach: 12000, reachRel: 80,  minScore: 0,  minRep: 0,  genres: null },
+  { name: "Pocketworks",           tier: "Mid-size",     from: 2009,              share: 0.35, reach: 30000, reachRel: 140, minScore: 45, minRep: 25, genres: ["puzzle", "sim", "sports", "racing"] },
 ];
 const pubByName = n => PUBLISHERS.find(p => p.name === n);
 const pubActive = (p, year) => year >= p.from && year <= (p.until || 9999);
 
-// Deal terms scale with the publisher's size and your relationship
-function pubDealTerms(pubObj, rel, devCost, keepIp) {
-  const advance = Math.round(devCost * pubObj.adv * (0.8 + rel / 200) * (keepIp ? 0.5 : 1));
+// A deal is reach for a cut. Keeping the IP costs a deeper cut instead of
+// (the now-abolished) half advance.
+function pubDealTerms(pubObj, rel, keepIp) {
   const floor = pubObj.reach + Math.round(rel * pubObj.reachRel);
-  return { name: pubObj.name, advance, share: pubObj.share, floor, ipRights: keepIp, guarantee: pubObj.guarantee };
+  const share = keepIp ? pubObj.share * 0.7 : pubObj.share;
+  return { name: pubObj.name, share, floor, ipRights: keepIp };
 }
 
 const INDIE_NAMES = ["Moonlight Attic", "Cardboard Rocket", "Two Brothers Basement", "Neon Possum", "Static Cling Games", "Paper Lantern", "Rust Belt Studio", "Midnight Waffle", "Glass Cannon Collective", "Tumbleweed Digital", "Fern & Pixel", "Broke Compass"];
@@ -2111,10 +2114,8 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
     const p0 = prev[slot];
     if (!p0) return prev;
     // Publishers sign the finished game at launch. Older saves may still carry
-    // a deal signed at greenlight on the project itself — honor it, but don't
-    // pay its advance twice (it was paid at start).
+    // a deal signed at greenlight on the project itself — honor it.
     const p = launchDeal ? { ...p0, pubDeal: launchDeal } : p0;
-    const signAdvance = launchDeal ? launchDeal.advance : 0;
     const score = computeScore(prev, p);
     // A publisher's logo on the box is distribution: sales calculate as if you
     // had at least their reach in fans — but they keep 65% of revenue.
@@ -2264,9 +2265,9 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
     if (p.pubDeal) {
       rec.pubName = p.pubDeal.name;
       const rel0 = publishers?.[p.pubDeal.name]?.rel ?? 50;
-      const guar = p.pubDeal.guarantee ?? 55; // older deals carried the classic 55+ clause
+      const guar = p.pubDeal.guarantee || 0; // only legacy greenlight deals carry a clawback clause
       let relD;
-      if (guar && score < guar) {
+      if (guar && score < guar && p.pubDeal.advance) {
         clawback = Math.round(p.pubDeal.advance * 0.5);
         relD = -20;
         pubLog = `📮 "${rec.name}" missed ${p.pubDeal.name}'s score guarantee (${score} < ${guar}). They clawed back ${money$(clawback)} of the advance — and they're furious.`;
@@ -2289,8 +2290,8 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
       ips,
       publishers,
       pubIps: (typeof pubKeptIp !== "undefined" && pubKeptIp) ? [...(prev.pubIps || []), pubKeptIp] : (prev.pubIps || []),
-      money: prev.money - clawback + launchBonus + signAdvance,
-      yearStats: ysAdd(ysAdd(prev.yearStats, "exp", "biz", clawback), "rev", "funding", launchBonus + signAdvance),
+      money: prev.money - clawback + launchBonus,
+      yearStats: ysAdd(ysAdd(prev.yearStats, "exp", "biz", clawback), "rev", "funding", launchBonus),
       holders,
       [slot]: null,
       released: [rec, ...prev.released],
@@ -2314,7 +2315,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
     if (remakeLog) out.log = pushLog(out, remakeLog);
     if (mkt <= 0.85) out.log = pushLog(out, `🥵 The market is flooded with ${genreById(p.genre).name.toLowerCase()} / ${topicById(p.topic).name.toLowerCase()} games right now — sales take a ${Math.round((1 - mkt) * 100)}% haircut.`);
     if (mkt >= 1.05) out.log = pushLog(out, `🌱 Nobody's been making ${genreById(p.genre).name.toLowerCase()} games — starved buyers pay a premium.`);
-    if (launchDeal) out.log = pushLog(out, `📮 ${launchDeal.name} signed "${rec.name}" off the finished build — advance ${money$(launchDeal.advance)}, they keep ${100 - Math.round(launchDeal.share * 100)}% of revenue${launchDeal.ipRights ? "" : " and the IP, if this becomes one"}.`);
+    if (launchDeal) out.log = pushLog(out, `📮 ${launchDeal.name} is publishing "${rec.name}" — their logo puts it in front of ~${Math.round(launchDeal.floor / 1000)}K fans; they keep ${100 - Math.round(launchDeal.share * 100)}% of revenue${launchDeal.ipRights ? "" : " and the IP, if this becomes one"}.`);
     if (rec.mmo) out.log = pushLog(out, `🌍 "${rec.name}" opened its servers to ${rec.subs.toLocaleString()} subscribers. The meter runs both ways — subscriptions in, server bills out.`);
     else if (rec.live) out.log = pushLog(out, `🌐 "${rec.name}" launched as a live-service game — weekly revenue as long as you keep it healthy.`);
     if (pubLog) out.log = pushLog(out, pubLog);
@@ -3639,6 +3640,16 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, se
   const [launchPub, setLaunchPub] = useState(null); // { name, keepIp } — publisher signing the FINISHED game; null = self-publish
   const [topicPicker, setTopicPicker] = useState(false); // full topic list modal
 
+  // Every publisher's testers play the finished build; one shared estimate
+  // (stable within a week, re-rolled as polish continues) decides who knocks.
+  const pubEst = useMemo(() => {
+    const pp = s[slot];
+    if (!pp || pp.stage !== "polish") return null;
+    let sum = 0;
+    for (let i = 0; i < 7; i++) sum += computeScore(s, pp);
+    return Math.round(sum / 7);
+  }, [s, slot]);
+
   // When a project wraps, clear the drafting table for the next pitch
   useEffect(() => {
     if (!curProj) setDraft(v => ({ ...v, ip: null, remakeOf: null, name: "" }));
@@ -3670,18 +3681,21 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, se
       const est = Math.round(sum / 7);
       band = [Math.max(5, est - 5), Math.min(98, est + 5)];
     }
-    // Publishers bid on the FINISHED game: size, predicted quality (focus
-    // testing sharpens their read), hype, and your relationship set the offer.
+    // Publishers approach YOU over the finished build. Their own playtest
+    // (pubEst) has to clear their score bar, the genre has to be one they
+    // publish, and they remember how past deals went. What they bring is
+    // reach; what they take is a cut.
     const offers = canRelease ? PUBLISHERS.filter(pb => pubActive(pb, year)).map(pb => {
       const rel = s.publishers?.[pb.name]?.rel ?? 50;
-      const sizeC = SIZES.find(z => z.id === p.size) || SIZES[0];
-      const qMult = band ? Math.max(0.4, ((band[0] + band[1]) / 2) / 65) : 1;
-      const hMult = 1 + (p.hype || 0) / 400;
-      const basis = Math.round(sizeC.cost * (p.ip ? 0.75 : 1) * qMult * hMult);
-      const terms = pubDealTerms(pb, rel, basis, launchPub?.name === pb.name ? launchPub.keepIp : false);
-      return { pb, rel, terms, refuses: rel < 25, locked: (s.rep ?? 50) < pb.minRep };
-    }) : [];
-    const chosenOffer = launchPub ? offers.find(o => o.pb.name === launchPub.name && !o.refuses && !o.locked) : null;
+      const terms = pubDealTerms(pb, rel, launchPub?.name === pb.name ? launchPub.keepIp : false);
+      const reason = rel < 25 ? "Won't work with you after last time."
+        : (s.rep ?? 50) < pb.minRep ? `Wants a proven studio — reputation ${pb.minRep}+ (yours: ${Math.round(s.rep ?? 50)}).`
+        : pb.genres && !pb.genres.includes(p.genre) ? `Doesn't publish ${genreById(p.genre).name.toLowerCase()} games.`
+        : pubEst != null && pubEst < pb.minScore ? `Played the build and passed — they only ship ${pb.minScore}+ material.`
+        : null;
+      return { pb, rel, terms, reason };
+    }).sort((a, b) => (a.reason ? 1 : 0) - (b.reason ? 1 : 0) || b.terms.floor - a.terms.floor) : [];
+    const chosenOffer = launchPub ? offers.find(o => o.pb.name === launchPub.name && !o.reason) : null;
     return (
       <>
       {teamBar}
@@ -3777,7 +3791,12 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, se
           )}
           {canRelease && (
             <>
-              <div style={{ fontSize: 13, color: C.dim, letterSpacing: 1, margin: "4px 0 6px" }}>PUBLISHING — OFFERS ON THE FINISHED BUILD</div>
+              <div style={{ fontSize: 13, color: C.dim, letterSpacing: 1, margin: "4px 0 6px" }}>PUBLISHING — WHO'S AT THE DOOR</div>
+              {!offers.some(o => !o.reason) && (
+                <div style={{ fontSize: 13, color: C.dim, marginBottom: 8 }}>
+                  No publisher wants this one. Self-publishing it is.
+                </div>
+              )}
               <div style={{ display: "grid", gap: 6, marginBottom: 10 }}>
                 <button onClick={() => setLaunchPub(null)} style={{
                   padding: "10px 12px", minHeight: 48, borderRadius: 12, cursor: "pointer", textAlign: "left",
@@ -3787,22 +3806,17 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, se
                   ✊ Self-publish
                   <div style={{ fontSize: 11, color: C.dim, fontWeight: 400, marginTop: 2 }}>Keep 100% of revenue and the IP. Sales lean entirely on your {s.fans.toLocaleString()} fans.</div>
                 </button>
-                {offers.map(({ pb, rel, terms, refuses, locked }) => {
-                  const off = refuses || locked;
+                {offers.map(({ pb, rel, terms, reason }) => {
                   const sel = launchPub?.name === pb.name;
                   return (
-                    <button key={pb.name} disabled={off} onClick={() => setLaunchPub(v => v?.name === pb.name ? v : { name: pb.name, keepIp: false })} style={{
-                      padding: "10px 12px", minHeight: 48, borderRadius: 12, cursor: off ? "default" : "pointer", textAlign: "left",
+                    <button key={pb.name} disabled={!!reason} onClick={() => setLaunchPub(v => v?.name === pb.name ? v : { name: pb.name, keepIp: false })} style={{
+                      padding: "10px 12px", minHeight: 48, borderRadius: 12, cursor: reason ? "default" : "pointer", textAlign: "left",
                       border: `2px solid ${sel ? C.green : C.line}`, background: sel ? "#123A28" : C.panelHi,
-                      color: C.ink, fontFamily: "'Rubik', sans-serif", fontSize: 14, fontWeight: 700, touchAction: "manipulation", opacity: off ? 0.5 : 1,
+                      color: C.ink, fontFamily: "'Rubik', sans-serif", fontSize: 14, fontWeight: 700, touchAction: "manipulation", opacity: reason ? 0.5 : 1,
                     }}>
                       📮 {pb.name} <span style={{ fontSize: 11, color: C.cyan }}>{pb.tier}</span> <span style={{ fontSize: 11, color: rel >= 65 ? C.gold : rel >= 40 ? C.dim : C.red }}>rel {Math.round(rel)}</span>
                       <div style={{ fontSize: 11, color: C.dim, fontWeight: 400, marginTop: 2 }}>
-                        {refuses
-                          ? "Won't work with you after last time."
-                          : locked
-                          ? `Only signs proven studios — reputation ${pb.minRep}+ required (yours: ${Math.round(s.rep ?? 50)}).`
-                          : `Advance ${money$(terms.advance)} · reach ~${(terms.floor / 1000).toFixed(0)}K fans · you keep ${Math.round(pb.share * 100)}% · ${pb.guarantee ? `score guarantee: ${pb.guarantee}+` : "no score guarantee"}`}
+                        {reason || `Puts it in front of ~${Math.round(terms.floor / 1000)}K fans · you keep ${Math.round(terms.share * 100)}% of revenue`}
                       </div>
                     </button>
                   );
@@ -3814,9 +3828,9 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, se
                   border: `2px solid ${launchPub.keepIp ? C.gold : C.line}`, background: launchPub.keepIp ? "#3A3110" : C.panelHi,
                   color: C.ink, fontFamily: "'Rubik', sans-serif", fontSize: 14, fontWeight: 700, touchAction: "manipulation",
                 }}>
-                  📜 Keep the IP rights {launchPub.keepIp ? "— YES (advance halved)" : "— NO (they own the franchise)"}
+                  📜 Keep the IP rights {launchPub.keepIp ? `— YES (deeper cut: you keep ${Math.round(chosenOffer.terms.share * 100)}%)` : "— NO (they own the franchise)"}
                   <div style={{ fontSize: 11, color: C.dim, fontWeight: 400, marginTop: 2 }}>
-                    If this game becomes a franchise, whoever holds the rights owns it. Half the advance buys your name on the deed.
+                    If this game becomes a franchise, whoever holds the rights owns it. Keeping your name on the deed costs a deeper revenue cut.
                   </div>
                 </button>
               )}
@@ -4158,7 +4172,7 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, se
                   Upfront cost: <b style={{ color: C.gold }}>{money$(cost)}</b>
                   <span style={{ color: C.dim }}> (dev {money$(devCost)}{draft.ip ? " after IP asset reuse" : ""} + platform {money$(effLicense(s, plat, s.week))}{engFee ? ` + engine fee ${money$(engFee)}` : ""})</span>
                   <div style={{ marginTop: 4, fontSize: 13, color: C.dim }}>
-                    📮 You fund development yourself — publishers bid on the finished game at launch.
+                    📮 You fund development yourself — publishers come knocking when the game is finished, if it clears their bar.
                   </div>
                   {draft.exclusive && plat.holder && (
                     <div style={{ marginTop: 4 }}>
