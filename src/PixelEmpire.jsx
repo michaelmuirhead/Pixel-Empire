@@ -453,6 +453,67 @@ const EXP_LABELS = {
 const ysAdd = (ys, kind, key, amt) => !ys || !amt ? ys
   : { ...ys, [kind]: { ...(ys[kind] || {}), [key]: ((ys[kind] || {})[key] || 0) + amt } };
 
+// ---------- AMBIENT MUSIC ----------
+// Four looping tracks in public/music (see scripts/generate-music.mjs), one
+// per era of the timeline. Playback runs through Web Audio so loops are
+// seamless and era changes crossfade.
+const MUSIC_TRACKS = [
+  { id: "chip-dreams",    from: 1984, name: "Chip Dreams" },
+  { id: "neon-grid",      from: 1995, name: "Neon Grid" },
+  { id: "polygon-sunset", from: 2006, name: "Polygon Sunset" },
+  { id: "cloud-save",     from: 2016, name: "Cloud Save" },
+];
+const trackForYear = y => [...MUSIC_TRACKS].reverse().find(t => y >= t.from) || MUSIC_TRACKS[0];
+
+const music = {
+  ctx: null, master: null, live: null, current: null, buffers: {}, loading: null,
+  async play(id) {
+    if (this.current === id) {
+      if (this.ctx?.state === "suspended") this.ctx.resume().catch(() => {});
+      return;
+    }
+    if (this.loading === id) return;
+    try {
+      if (!this.ctx) {
+        this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        this.master = this.ctx.createGain();
+        this.master.gain.value = 0.35;
+        this.master.connect(this.ctx.destination);
+      }
+      if (this.ctx.state === "suspended") await this.ctx.resume().catch(() => {});
+      let buf = this.buffers[id];
+      if (!buf) {
+        this.loading = id;
+        const res = await fetch(`${import.meta.env.BASE_URL}music/${id}.mp3`);
+        buf = this.buffers[id] = await this.ctx.decodeAudioData(await res.arrayBuffer());
+        this.loading = null;
+      }
+      this.stop(1.2);
+      const src = this.ctx.createBufferSource();
+      src.buffer = buf;
+      src.loop = true;
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.0001, this.ctx.currentTime);
+      g.gain.linearRampToValueAtTime(1, this.ctx.currentTime + 1.5);
+      src.connect(g);
+      g.connect(this.master);
+      src.start();
+      this.live = { src, g };
+      this.current = id;
+    } catch { this.loading = null; } // no audio available — stay silent
+  },
+  stop(fade = 0.6) {
+    if (!this.live || !this.ctx) return;
+    const { src, g } = this.live;
+    try {
+      g.gain.setTargetAtTime(0, this.ctx.currentTime, fade / 4);
+      src.stop(this.ctx.currentTime + fade);
+    } catch {}
+    this.live = null;
+    this.current = null;
+  },
+};
+
 function pushLog(s, msg) {
   return [{ wk: s.week, msg }, ...s.log].slice(0, 40);
 }
@@ -1870,7 +1931,22 @@ export default function PixelEmpire() {
   const [mode, setMode] = useState("boot");   // boot | title | setup | play
   const [setup, setSetup] = useState({ studio: "", founder: "" });
   const [launchCard, setLaunchCard] = useState(null); // release results modal
+  const [musicOn, setMusicOn] = useState(() => {
+    try { return localStorage.getItem("pe-music") !== "off"; } catch { return true; }
+  });
   const saveTimer = useRef(null);
+
+  // Ambient music follows the in-game era; autoplay policies mean the first
+  // note may wait for the first tap, so a one-shot gesture listener retries.
+  const musicTrackId = trackForYear(s ? yearOf(s.week) : 1984).id;
+  useEffect(() => {
+    try { localStorage.setItem("pe-music", musicOn ? "on" : "off"); } catch {}
+    if (!musicOn) { music.stop(); return; }
+    const kick = () => music.play(musicTrackId);
+    kick();
+    window.addEventListener("pointerdown", kick, { once: true });
+    return () => window.removeEventListener("pointerdown", kick);
+  }, [musicOn, musicTrackId]);
 
   // Boot: check for save
   useEffect(() => {
@@ -2908,6 +2984,13 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
             <div key={i} style={{ width: 46, height: 62, borderRadius: 6, background: c, opacity: .85, transform: `rotate(${(i - 1.5) * 4}deg)` }} />
           ))}
         </div>
+        <button onClick={() => setMusicOn(v => !v)} style={{
+          marginTop: 28, padding: "10px 18px", borderRadius: 12, cursor: "pointer", fontSize: 15, fontWeight: 700,
+          border: `2px solid ${C.line}`, background: "transparent", color: C.dim,
+          fontFamily: "'Rubik', sans-serif", touchAction: "manipulation",
+        }}>
+          {musicOn ? "🔊 Music on" : "🔇 Music off"}
+        </button>
       </div>
     );
   }
@@ -3023,7 +3106,16 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
           <Stat label="Research" value={Math.floor(s.rp)} color={C.gold} />
           <Stat label="Weekly cost" value={money$(weeklyCost)} color={C.dim} />
         </div>
-        <Btn color={C.green} onClick={nextWeek}>▶ Next Week</Btn>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button onClick={() => setMusicOn(v => !v)} title={musicOn ? `Music: ${trackForYear(year).name} — tap to mute` : "Music off — tap to play"} style={{
+            width: 44, height: 44, borderRadius: 12, cursor: "pointer", fontSize: 19,
+            border: `2px solid ${C.line}`, background: musicOn ? C.panelHi : "transparent",
+            color: musicOn ? C.ink : C.dim, touchAction: "manipulation",
+          }}>
+            {musicOn ? "🔊" : "🔇"}
+          </button>
+          <Btn color={C.green} onClick={nextWeek}>▶ Next Week</Btn>
+        </div>
       </div>
 
       {warnings.length > 0 && (
