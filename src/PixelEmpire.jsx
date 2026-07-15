@@ -149,6 +149,71 @@ const PLATFORMS = [
   { id: "xsx",       name: "Xbox Series X",     yr: 2020, end: 2100, share: 0.50, lic: 38000, tech: 7, holder: "Microsoft", blurb: "Game Pass and teraflops." },
 ];
 
+// ---------- AUDIENCE SEGMENTS ----------
+// Four demographics share the market: kids, casual, core, enthusiast. Every
+// genre draws a mix, every platform's install base skews a mix — putting the
+// right game on the right machine is a targeting decision (±25% sales).
+const SEGMENTS = [["kids", "Kids"], ["casual", "Casual"], ["core", "Core"], ["enth", "Enthusiast"]];
+const GENRE_AUD = {
+  action:     { kids: 0.20, casual: 0.20, core: 0.45, enth: 0.15 },
+  adventure:  { kids: 0.15, casual: 0.30, core: 0.35, enth: 0.20 },
+  rpg:        { kids: 0.05, casual: 0.15, core: 0.45, enth: 0.35 },
+  strategy:   { kids: 0.05, casual: 0.15, core: 0.40, enth: 0.40 },
+  sim:        { kids: 0.10, casual: 0.40, core: 0.25, enth: 0.25 },
+  puzzle:     { kids: 0.25, casual: 0.50, core: 0.15, enth: 0.10 },
+  sports:     { kids: 0.20, casual: 0.40, core: 0.35, enth: 0.05 },
+  racing:     { kids: 0.25, casual: 0.35, core: 0.30, enth: 0.10 },
+  shooter:    { kids: 0.05, casual: 0.20, core: 0.55, enth: 0.20 },
+  platformer: { kids: 0.40, casual: 0.30, core: 0.25, enth: 0.05 },
+};
+const PLAT_AUD = {
+  pc:        { kids: 0.05, casual: 0.20, core: 0.40, enth: 0.35 },
+  nes:       { kids: 0.45, casual: 0.30, core: 0.20, enth: 0.05 },
+  sms:       { kids: 0.35, casual: 0.30, core: 0.28, enth: 0.07 },
+  gb:        { kids: 0.45, casual: 0.35, core: 0.15, enth: 0.05 },
+  genesis:   { kids: 0.25, casual: 0.25, core: 0.40, enth: 0.10 },
+  snes:      { kids: 0.35, casual: 0.25, core: 0.30, enth: 0.10 },
+  ps1:       { kids: 0.15, casual: 0.30, core: 0.40, enth: 0.15 },
+  n64:       { kids: 0.40, casual: 0.25, core: 0.28, enth: 0.07 },
+  dreamcast: { kids: 0.10, casual: 0.20, core: 0.45, enth: 0.25 },
+  ps2:       { kids: 0.15, casual: 0.35, core: 0.38, enth: 0.12 },
+  gba:       { kids: 0.45, casual: 0.30, core: 0.20, enth: 0.05 },
+  xbox:      { kids: 0.05, casual: 0.20, core: 0.55, enth: 0.20 },
+  gamecube:  { kids: 0.45, casual: 0.25, core: 0.25, enth: 0.05 },
+  ds:        { kids: 0.35, casual: 0.45, core: 0.15, enth: 0.05 },
+  x360:      { kids: 0.05, casual: 0.25, core: 0.55, enth: 0.15 },
+  ps3:       { kids: 0.08, casual: 0.25, core: 0.50, enth: 0.17 },
+  wii:       { kids: 0.35, casual: 0.50, core: 0.10, enth: 0.05 },
+  mobile:    { kids: 0.15, casual: 0.60, core: 0.20, enth: 0.05 },
+  ps4:       { kids: 0.08, casual: 0.27, core: 0.50, enth: 0.15 },
+  xbone:     { kids: 0.08, casual: 0.27, core: 0.50, enth: 0.15 },
+  switch:    { kids: 0.30, casual: 0.35, core: 0.28, enth: 0.07 },
+  ps5:       { kids: 0.07, casual: 0.25, core: 0.50, enth: 0.18 },
+  xsx:       { kids: 0.07, casual: 0.25, core: 0.50, enth: 0.18 },
+};
+// Dot product of the mixes, scaled so an even match ≈ 1.0, clamped to ±25%.
+// Unknown platforms (your own console) sell to everyone evenly.
+function audienceFit(genreId, platId) {
+  const g = GENRE_AUD[genreId], p = PLAT_AUD[platId];
+  if (!g || !p) return 1;
+  const dot = SEGMENTS.reduce((a, [k]) => a + (g[k] || 0) * (p[k] || 0), 0);
+  return Math.max(0.75, Math.min(1.25, dot * 3.3));
+}
+
+// Marketing buys attention from a specific crowd — hype lands only as well as
+// the channel's audience overlaps the game's.
+const MKT_CHANNELS = [
+  { id: "tv",   name: "TV spots",     cost: 2500, boost: 16, aud: { kids: 0.40, casual: 0.45, core: 0.10, enth: 0.05 } },
+  { id: "mag",  name: "Games press",  cost: 1500, boost: 14, aud: { kids: 0.05, casual: 0.20, core: 0.50, enth: 0.25 } },
+  { id: "expo", name: "Demo circuit", cost: 2000, boost: 15, aud: { kids: 0.10, casual: 0.15, core: 0.45, enth: 0.30 } },
+];
+function channelFit(channel, genreId) {
+  const g = GENRE_AUD[genreId];
+  if (!g) return 1;
+  const dot = SEGMENTS.reduce((a, [k]) => a + (channel.aud[k] || 0) * (g[k] || 0), 0);
+  return Math.max(0.6, Math.min(1.4, dot * 3.3));
+}
+
 // Old fictional-platform saves map onto the real timeline
 const PLAT_MIGRATE = { vec8: "nes", pocket: "gb", mega: "genesis", nep32: "ps1", cubex: "ps2", wavii: "wii", nephd: "ps3", nep4k: "ps4", nomad: "switch", nep5: "ps5" };
 const HOLDER_MIGRATE = { "Neptune": "Sony", "Cube Systems": "Nintendo", "Vectron Corp": "Nintendo", "MegaVision": "Sega" };
@@ -181,11 +246,12 @@ function platPhase(s, p, week) {
   if (age < Math.max(2.5, life - 3)) return "Peak";
   return "Fading";
 }
-// Dev kits get cheap on a dying platform; holder loyalty knocks more off
+// Dev kits get cheap on a dying platform; holder loyalty knocks more off —
+// and a holder who hates you (say, a rival hardware maker) charges a premium
 function effLicense(s, p, week) {
   const c = platCurve(s, p, week);
   const rel = p.holder ? ((s.holders || {})[p.holder]?.rel ?? 50) : 50;
-  return Math.round(p.lic * (c >= 0.9 ? 1 : c >= 0.5 ? 0.85 : 0.6) * (1 - Math.max(0, rel - 50) / 200));
+  return Math.round(p.lic * (c >= 0.9 ? 1 : c >= 0.5 ? 0.85 : 0.6) * (1 - Math.max(0, rel - 50) / 200 + Math.max(0, 40 - rel) / 200));
 }
 
 // Any studio can start any size — the only gate is having the cash. Team
@@ -201,6 +267,22 @@ const SIZES = [
 // Budgets balloon with the industry — dev costs inflate ~5% a year, so a
 // 2010s AAA is a real bet, not an arcade token.
 const sizeCost = (z, year) => Math.round(z.cost * (1 + (year - 1984) * 0.05));
+
+// Feature checklist: each adds work and budget, most need the right engine
+// part, and each pays off at review time. Overscoping is how games die.
+const GAME_FEATURES = [
+  { id: "save",      name: "Battery Save",        req: null,    yr: 1986, work: 0.06, score: 2 },
+  { id: "localmp",   name: "Local Multiplayer",   req: null,    yr: 1984, work: 0.08, score: 3 },
+  { id: "cutscene",  name: "Cinematic Cutscenes", req: "snd3",  yr: 1993, work: 0.10, score: 3 },
+  { id: "branch",    name: "Branching Story",     req: "tool2", yr: 1994, work: 0.10, score: 4 },
+  { id: "voice",     name: "Voice Acting",        req: "snd3",  yr: 1995, work: 0.10, score: 4 },
+  { id: "onlinemp",  name: "Online Multiplayer",  req: "net2",  yr: 1996, work: 0.15, score: 5 },
+  { id: "physics",   name: "Physics Playground",  req: "phy2",  yr: 1997, work: 0.12, score: 4 },
+  { id: "openworld", name: "Open World",          req: "tool3", yr: 2001, work: 0.20, score: 6 },
+  { id: "coop",      name: "Co-op Campaign",      req: "net3",  yr: 2003, work: 0.12, score: 4 },
+  { id: "photomode", name: "Photo Mode",          req: "gfx6",  yr: 2008, work: 0.06, score: 2 },
+];
+const featureWork = ids => (ids || []).reduce((a, id) => a + (GAME_FEATURES.find(f => f.id === id)?.work || 0), 0);
 
 // Bigger hardware = bigger games: total work scales with platform tech tier
 const workScale = platTech => 1 + (platTech - 1) * 0.35;
@@ -341,6 +423,24 @@ const TRAITS = {
 // Adding devs to one project has diminishing returns — the 2nd pair of hands
 // is worth less than the 1st, coordination eats the 8th. Two lean teams
 // out-produce one bloated one.
+// Each production stage leans on different chairs in the office: designers
+// carry pre-production, coders carry alpha, artists and audio carry beta's
+// content push, and polish is a code-heavy bug hunt. A team whose skills
+// match the current stage works up to 30% faster; a mismatched one drags.
+const STAGE_SKILLS = {
+  pre:    { design: 0.6, code: 0.1, art: 0.2, sound: 0.1, lean: "designers" },
+  alpha:  { code: 0.6, design: 0.2, art: 0.1, sound: 0.1, lean: "coders" },
+  beta:   { art: 0.4, sound: 0.2, code: 0.2, design: 0.2, lean: "artists & audio" },
+  polish: { code: 0.5, design: 0.1, art: 0.2, sound: 0.2, lean: "coders" },
+};
+function stageTeamFit(staff, team, stage) {
+  const w = STAGE_SKILLS[stage] || STAGE_SKILLS.alpha;
+  const crew = staff.filter(m => (m.team || "A") === team && !m.resting && !m.training);
+  if (!crew.length) return 1;
+  const v = crew.reduce((a, m) => a + m.code * w.code + m.design * w.design + m.art * w.art + m.sound * w.sound, 0) / crew.length;
+  return Math.max(0.75, Math.min(1.3, v / 5));
+}
+
 function effTeamOutput(staff, team, dtMult) {
   const outs = staff
     .filter(m => (m.team || "A") === team)
@@ -352,7 +452,7 @@ function effTeamOutput(staff, team, dtMult) {
 }
 
 function memberOutput(m) {
-  if (m.resting) return 0;
+  if (m.resting || m.training) return 0;
   let out = (m.code + m.design + m.art + m.sound) / 14;
   if ((m.energy ?? 100) < 20) out *= 0.5; // burned out
   if (m.trait === "nightowl") out *= 1.1;
@@ -447,13 +547,13 @@ const weekOf = wk => (wk % 52) + 1;
 // the actual cash delta so the statement always reconciles.
 const REV_LABELS = {
   sales: "Game sales", funding: "Advances & funding", contracts: "Contract work",
-  engine: "Engine licensing", label: "Publishing label", subs: "Subsidiaries",
-  ip: "IP sales", merch: "Merch", loan: "Loans & bailouts",
+  engine: "Engine licensing", console: "Console royalties", label: "Publishing label",
+  subs: "Subsidiaries", ip: "IP sales", merch: "Merch", loan: "Loans & bailouts",
 };
 const EXP_LABELS = {
   payroll: "Salaries & rent", dev: "Development & engines", marketing: "Marketing & events",
   liveops: "Live ops & servers", hiring: "Recruiting", label: "Publishing label",
-  biz: "Deals & acquisitions", loan: "Loan payments",
+  biz: "Deals & acquisitions", hardware: "Hardware division", loan: "Loan payments",
 };
 const ysAdd = (ys, kind, key, amt) => !ys || !amt ? ys
   : { ...ys, [kind]: { ...(ys[kind] || {}), [key]: ((ys[kind] || {})[key] || 0) + amt } };
@@ -538,6 +638,7 @@ function makeCandidate(year) {
   };
   c.salary = 80 + (c.code + c.design + c.art + c.sound) * 22;
   c.xp = 0; c.level = 1; c.energy = 100; c.resting = false;
+  c.age = ri(19, 45);
   c.trait = Math.random() < 0.5 ? pick(Object.keys(TRAITS)) : null;
   return c;
 }
@@ -548,7 +649,9 @@ function freshState(studioName, founder) {
     studioName,
     week: 0, money: 20000, fans: 0, rp: 0, morale: 80, rep: 50,
     office: 0,
-    staff: [{ id: "founder", name: founder, role: "Founder", code: 4, design: 4, art: 3, sound: 3, salary: 0, xp: 0, level: 1, energy: 100, resting: false, trait: "mentor", team: "A" }],
+    staff: [{ id: "founder", name: founder, role: "Founder", code: 4, design: 4, art: 3, sound: 3, salary: 0, xp: 0, level: 1, energy: 100, resting: false, trait: "mentor", team: "A", age: 27 }],
+    hallOfFame: [],
+    poachOffer: null,
     leadId: "founder",
     bidWar: null,
     loan: null, loanUsed: false, bankOffer: null,
@@ -564,6 +667,9 @@ function freshState(studioName, founder) {
     yearStats: { revenue: 0, lastRevenue: 0, fansStart: 0, repStart: 50, topRival: null, cashStart: 20000, rev: {}, exp: {} },
     yearReview: null,
     ledger: [],
+    consoles: [],        // hardware you've shipped
+    consoleProject: null, // hardware in the lab: { name, done, cost }
+    consoleRoyalties: 0,
     released: [],
     ips: {},        // IP you own
     market: [],     // IP currently for sale
@@ -599,7 +705,14 @@ function freshState(studioName, founder) {
 
 function topicById(id) { return TOPICS.find(t => t.id === id); }
 function genreById(id) { return GENRES.find(g => g.id === id); }
-function platById(id)  { return PLATFORMS.find(p => p.id === id); }
+// Player-built consoles live in save state but need to resolve through
+// platById like any other platform — a small registry keeps them reachable.
+let CUSTOM_PLATS = {};
+function syncCustomPlats(s) {
+  CUSTOM_PLATS = {};
+  for (const c of s?.consoles || []) CUSTOM_PLATS[c.id] = c;
+}
+function platById(id)  { return PLATFORMS.find(p => p.id === id) || CUSTOM_PLATS[id]; }
 
 function matchBonus(genreId, topicId) {
   const t = topicById(topicId);
@@ -662,6 +775,10 @@ function computeScore(state, proj) {
   if (size.id === "L") raw += 3;
   if (size.id === "AAA") raw += 5;
   if (proj.platform === "mobile" && proj.biz === "iap") raw -= 5; // critics dock aggressive monetization
+  // Features impress, with diminishing returns; milestone calls echo at review
+  raw += Math.min(14, (proj.features || []).reduce((a, id) => a + (GAME_FEATURES.find(f => f.id === id)?.score || 0), 0));
+  if (proj.gateChoice === "cut") raw -= 3;
+  if (proj.gateChoice === "extend") raw += 3;
   raw += proj.vision || 0; // a strong pre-production pays off at review time
   if (proj.remakeOf) {
     raw += proj.remakeOf.mode === "remaster" ? 0 : 2;            // remakes build on a proven design
@@ -691,7 +808,8 @@ function launchSales(state, proj, score) {
   const audience = Math.min(0.95, Math.max(0.06, platShareNow(state, plat, state.week)) + extraShare);
   let base =
     Math.pow(score / 10, 2.6) * 90 * size.mult * audience *
-    fanPull(state.fans) * (1 + hype / 100);
+    fanPull(state.fans) * (1 + hype / 100) *
+    audienceFit(proj.genre, proj.platform); // right game, right demographic
   if (proj.ip) {
     base *= (1 + Math.min(2, proj.ip.fans / 2500));    // the IP faithful buy day one
     base *= (1 - Math.min(0.4, proj.ip.fatigue / 250)); // fatigue caps the ceiling
@@ -800,9 +918,15 @@ async function loadGame() {
       s.pubIps = []; s.pitches = []; s.nextPitchWeek = s.week; s.pubProjects = [];
     }
     if (!s.leadId) s.leadId = s.staff[0]?.id || null;
-    const patchStaff = m => (m.xp === undefined ? { ...m, xp: 0, level: 1, energy: 100, resting: false, trait: m.trait ?? (Math.random() < 0.4 ? pick(Object.keys(TRAITS)) : null) } : m);
+    const patchStaff = m => {
+      let nm = m.xp === undefined ? { ...m, xp: 0, level: 1, energy: 100, resting: false, trait: m.trait ?? (Math.random() < 0.4 ? pick(Object.keys(TRAITS)) : null) } : m;
+      if (nm.age === undefined) nm = { ...nm, age: ri(22, 42) };
+      return nm;
+    };
     s.staff = s.staff.map(patchStaff);
     s.candidates = (s.candidates || []).map(patchStaff);
+    if (!s.hallOfFame) s.hallOfFame = [];
+    if (s.poachOffer === undefined) s.poachOffer = null;
     if (s.project && !s.project.price) s.project.price = "std";
     if (s.projectB === undefined) s.projectB = null;
     for (const k of ["project", "projectB"]) {
@@ -815,6 +939,10 @@ async function loadGame() {
       if (s[k]?.stage === "dev") s[k] = { ...s[k], stage: s[k].progress >= s[k].totalWeeks * 0.6 ? "beta" : "alpha" };
     }
     if (s.publishers) for (const p of PUBLISHERS) if (!s.publishers[p.name]) s.publishers[p.name] = { rel: 50 };
+    if (!s.consoles) s.consoles = [];
+    if (s.consoleProject === undefined) s.consoleProject = null;
+    if (s.consoleRoyalties === undefined) s.consoleRoyalties = 0;
+    syncCustomPlats(s);
     if (!s.yearStats) s.yearStats = { revenue: 0, lastRevenue: 0, fansStart: s.fans, repStart: s.rep ?? 50, topRival: null };
     if (s.yearReview === undefined) s.yearReview = null;
     if (s.yearStats.cashStart === undefined) s.yearStats = { ...s.yearStats, cashStart: s.money, rev: {}, exp: {} };
@@ -1054,8 +1182,32 @@ function simulateRivals(s, year) {
       const rTrendy = s.trend && (s.trend.type === "genre" ? s.trend.id === genreId : Math.random() < 0.3);
       r.prestige = Math.max(0, Math.round(r.prestige + (score - 55) * 8 * (rTrendy ? 2 : 1)));
       if (rTrendy && score >= 70) s.log = pushLog(s, `📈 ${r.name} rode the ${trendLabel(s.trend)} wave with "${title}" (${score}/100) — their stock is soaring.`);
+      // A moneyhatted studio ships this one exclusively on your hardware
+      let moneyhatHit = false;
+      if (r.moneyhat) {
+        const oc = (s.consoles || []).find(c => c.id === r.moneyhat);
+        if (oc && year >= oc.yr && year <= platEnd(s, oc)) {
+          const roy = Math.round(score * 45 * (1 + (year - 1984) * 0.03));
+          s.money += roy;
+          s.yearStats = ysAdd(s.yearStats, "rev", "console", roy);
+          s.consoleRoyalties = (s.consoleRoyalties || 0) + roy;
+          s.consoles = s.consoles.map(c => c.id === oc.id ? { ...c, share: Math.min(0.45, c.share + 0.015) } : c);
+          s.log = pushLog(s, `🤝 ${r.name} shipped "${title}" exclusively on your ${oc.name} — ${money$(roy)} in royalties, and the install base grows.`);
+          moneyhatHit = true;
+        }
+        r.moneyhat = null;
+      }
+      // Third parties on YOUR hardware pay license royalties per release
+      if (!moneyhatHit) for (const oc of s.consoles || []) {
+        if (year >= oc.yr && year <= platEnd(s, oc) && Math.random() < Math.min(0.55, platShareNow(s, oc, s.week) * 1.8)) {
+          const roy = Math.round(score * 15 * (1 + (year - 1984) * 0.03));
+          s.money += roy;
+          s.yearStats = ysAdd(s.yearStats, "rev", "console", roy);
+          s.consoleRoyalties = (s.consoleRoyalties || 0) + roy;
+        }
+      }
       r.nextRelease = s.week + ri(r.cadence[0], r.cadence[1]);
-      s.rivalReleases = [...(s.rivalReleases || []), { name: title, score, year, genre: genreId, rivalId: id, rivalName: r.name }].slice(-80);
+      s.rivalReleases = [...(s.rivalReleases || []), { name: title, score, year, wk: s.week, genre: genreId, rivalId: id, rivalName: r.name }].slice(-80);
     }
 
     // Subsidiaries keep their catalog in the family and can't go under on their own
@@ -1419,6 +1571,29 @@ async function wipeSave() {
 function tick(prev) {
   let s = { ...prev, week: prev.week + 1 };
   const year = yearOf(s.week);
+  syncCustomPlats(s);
+
+  // Hardware lab: your console launches when the work is done
+  if (s.consoleProject && s.week >= s.consoleProject.done) {
+    const hwTech = Math.max(...PLATFORMS.filter(p => p.yr <= year).map(p => p.tech));
+    const c = {
+      id: "own-" + Math.random().toString(36).slice(2),
+      name: s.consoleProject.name, yr: year, end: year + 9,
+      share: 0.16, lic: 0, tech: hwTech, holder: null, own: true,
+      blurb: "Your own machine. No license fees — and every third-party game pays you.",
+    };
+    s.consoles = [...(s.consoles || []), c];
+    s.consoleProject = null;
+    syncCustomPlats(s);
+    s.log = pushLog(s, `🕹 The ${c.name} hits shelves! Your hardware, your rules — ship first-party hits to grow the install base. A hardware generation lasts ~9 years.`);
+    // The other platform holders just watched you become competition
+    const holders = { ...(s.holders || {}) };
+    for (const hName of ["Nintendo", "Sega", "Sony", "Microsoft"]) {
+      holders[hName] = { rel: Math.max(0, (holders[hName]?.rel ?? 50) - 15) };
+    }
+    s.holders = holders;
+    s.log = pushLog(s, `🥊 Nintendo, Sega, Sony, and Microsoft take notice — relations drop across the board, and your dev-kit fees on their machines may rise.`);
+  }
 
   // Costs
   const salaries = s.staff.reduce((a, m) => a + m.salary, 0);
@@ -1455,8 +1630,21 @@ function tick(prev) {
   const hasMentor = s.staff.some(m => m.trait === "mentor" && !m.resting);
   s.staff = s.staff.map(m => {
     let nm = { ...m };
+    // the calendar spares no one
+    nm.age = (nm.age ?? 30) + 1 / 52;
+    if (nm.id !== "founder" && !nm.retireWarned && nm.age >= 59) {
+      nm.retireWarned = true;
+      s.log = pushLog(s, `⏳ ${nm.name} is thinking about retirement — maybe a year left in the tank.`);
+    }
+    // training wraps: +1 to their strongest stat
+    if (nm.training && s.week >= nm.training.until) {
+      const best = ["code", "design", "art", "sound"].sort((a, b) => nm[b] - nm[a])[0];
+      nm[best] = Math.min(10, nm[best] + 1);
+      nm.training = null;
+      s.log = pushLog(s, `📚 ${nm.name} returns from the masterclass — +1 ${best}.`);
+    }
     // energy
-    if (nm.resting || !busy) {
+    if (nm.resting || nm.training || !busy) {
       nm.energy = Math.min(100, (nm.energy ?? 100) + (nm.resting ? 8 : 4));
     } else {
       let drain = nm.trait === "crunchproof" ? 0.75 : nm.trait === "fragile" ? 2.2 : 1.5;
@@ -1483,6 +1671,43 @@ function tick(prev) {
     return nm;
   });
 
+  // Time comes for everyone: veterans hang it up around 60
+  const retiring = s.staff.filter(m => m.id !== "founder" && (m.age ?? 30) >= 60);
+  if (retiring.length) {
+    for (const m of retiring) {
+      s.hallOfFame = [...(s.hallOfFame || []), { name: m.name, role: m.role, level: m.level ?? 1, year }];
+      s.log = pushLog(s, `🎓 ${m.name} retires at ${Math.floor(m.age)} after a storied career. Their name goes up in the studio lobby.`);
+    }
+    s.staff = s.staff.filter(m => !retiring.includes(m));
+    if (retiring.some(m => m.id === s.leadId)) s.leadId = "founder";
+    s.morale = Math.min(100, s.morale + 2); // one hell of a send-off party
+  }
+
+  // Rivals shop for YOUR veterans — match the money or lose the person
+  if (!s.poachOffer && s.staff.length > 1 && Math.random() < 1 / 120) {
+    const targets = s.staff.filter(m => m.id !== "founder" && (m.code + m.design + m.art + m.sound) >= 22 && (m.age ?? 30) < 55);
+    const suitors = independentRivals(s);
+    if (targets.length && suitors.length) {
+      const m = pick(targets);
+      const suitor = pick(suitors);
+      const offer = Math.round(m.salary * 1.45);
+      s.poachOffer = { staffId: m.id, name: m.name, rival: suitor.name, rivalId: suitor.id, salary: offer, deadline: s.week + 4 };
+      s.log = pushLog(s, `📞 ${suitor.name} is courting ${m.name} with ${money$(offer)}/wk. Match it on the Team tab — or lose them in 4 weeks.`);
+    }
+  }
+  if (s.poachOffer && s.week >= s.poachOffer.deadline) {
+    const m = s.staff.find(x => x.id === s.poachOffer.staffId);
+    if (m) {
+      s.staff = s.staff.filter(x => x.id !== m.id);
+      if (s.leadId === m.id) s.leadId = "founder";
+      const rv = s.rivals?.[s.poachOffer.rivalId];
+      if (rv) s.rivals = { ...s.rivals, [s.poachOffer.rivalId]: { ...rv, skill: Math.min(90, (rv.skill || 50) + 2) } };
+      s.morale = Math.max(30, s.morale - 6);
+      s.log = pushLog(s, `🚪 ${m.name} left for ${s.poachOffer.rival}. The offer sat unanswered too long.`);
+    }
+    s.poachOffer = null;
+  }
+
   // Project progress (both team slots run through the same machinery).
   // The pipeline: pre-production (vision) → alpha (features, bugs pour in) →
   // beta (feature freeze, previews build hype) → post-production polish.
@@ -1496,9 +1721,10 @@ function tick(prev) {
     const bugRate = (s.tech.includes("qa") ? 0.6 : 1)
       * (s.staff.some(m => m.trait === "bugmagnet" && crew(m)) ? 1.1 : 1)
       * (np.crunch ? 1.25 : 1);
+    const stageFit = stageTeamFit(s.staff, np.team || "A", np.stage);
     if (np.stage === "pre") {
       // Pre-production: no bugs, and the team's design chops set the vision
-      np.progress += Math.min(gainCap, teamOutput * projectShare * speed * rnd(0.85, 1.15));
+      np.progress += Math.min(gainCap, teamOutput * projectShare * speed * stageFit * rnd(0.85, 1.15));
       s.rp += rnd(0.3, 0.8);
       if (np.progress >= np.totalWeeks * 0.15) {
         const crewMembers = s.staff.filter(crew);
@@ -1509,17 +1735,18 @@ function tick(prev) {
       }
     } else if (np.stage === "alpha") {
       // Alpha: features go in fast, and so do the bugs
-      np.progress += Math.min(gainCap, teamOutput * projectShare * speed * rnd(0.85, 1.15));
+      np.progress += Math.min(gainCap, teamOutput * projectShare * speed * stageFit * rnd(0.85, 1.15));
       np.bugs += rnd(0.5, 1.5) * 1.2 * bugRate * sizeBugMult;
       s.rp += rnd(0.6, 1.4);
       if (np.progress >= np.totalWeeks * 0.6) {
         np.stage = "beta";
+        np.gateOpen = true; // the alpha review lands on your desk
         np.hype = Math.min(100, (np.hype || 0) + 5);
-        s.log = pushLog(s, `🧪 "${np.name}" is feature-complete — beta begins, and press previews start trickling out.`);
+        s.log = pushLog(s, `🧪 "${np.name}" is feature-complete — beta begins, and the alpha review is on your desk. Check the Develop tab.`);
       }
     } else if (np.stage === "beta") {
       // Beta: features frozen — fewer new bugs, and previews build hype weekly
-      np.progress += Math.min(gainCap, teamOutput * projectShare * speed * rnd(0.85, 1.15));
+      np.progress += Math.min(gainCap, teamOutput * projectShare * speed * stageFit * rnd(0.85, 1.15));
       np.bugs += rnd(0.3, 0.9) * 0.7 * bugRate * sizeBugMult;
       np.hype = Math.min(100, (np.hype || 0) + 0.5);
       s.rp += rnd(0.6, 1.4);
@@ -1528,7 +1755,7 @@ function tick(prev) {
         s.log = pushLog(s, `"${np.name}" hit content-complete — post-production begins. Squash bugs and build hype.`);
       }
     } else if (np.stage === "polish") {
-      np.bugs = Math.max(0, np.bugs - teamOutput * projectShare * 0.9 * (s.tech.includes("autotest") ? 1.5 : 1) * (np.crunch ? 1.3 : 1));
+      np.bugs = Math.max(0, np.bugs - teamOutput * projectShare * 0.9 * stageFit * (s.tech.includes("autotest") ? 1.5 : 1) * (np.crunch ? 1.3 : 1));
       if (!s.tech.includes("pr")) np.hype = Math.max(0, (np.hype || 0) - 1);
       s.rp += rnd(0.3, 0.8);
     }
@@ -1564,8 +1791,22 @@ function tick(prev) {
     }
   }
 
+  // DLC wraps: a finished pack revives the tail (or extends a live one)
+  s.released = s.released.map(gm => {
+    if (!gm.dlcUntil || s.week < gm.dlcUntil) return gm;
+    const revived = gm.weeksLeft <= 0;
+    s.log = pushLog(s, `📦 "${gm.name}" DLC launched — ${revived ? "the game is back on the charts" : "the sales tail gets a second wind"}.`);
+    s.fans += ri(40, 120);
+    return {
+      ...gm, dlcUntil: undefined, dlcCount: (gm.dlcCount || 0) + 1,
+      weeksLeft: Math.max(gm.weeksLeft, 10), weeksTotal: Math.max(gm.weeksTotal, 10),
+      weeklyBase: revived ? gm.weeklyBase * 0.5 : gm.weeklyBase * 1.1,
+    };
+  });
+
   // Sales on released games + live-service revenue
   let weekRevenue = 0, serverBills = 0;
+  const weekChart = []; // this week's sellers, for the top-10 chart
   // Every earning week is recorded on the game so the shelf can chart it
   const withHistory = (gm, rev, units) => [
     ...(gm.salesHistory || []),
@@ -1585,6 +1826,7 @@ function tick(prev) {
       const net = rev - serverCost;
       weekRevenue += rev;
       serverBills += serverCost;
+      weekChart.push({ id: gm.id, name: gm.name, rev, mine: true });
       if (net < 0 && !gm.bleeding) s.log = pushLog(s, `🩸 "${gm.name}" is losing money — server bills now outrun subscriptions. Ship an expansion or sunset it.`);
       const grown = health >= 70
         ? Math.min(gm.subCap || Infinity, (gm.subs || 0) * 1.02)
@@ -1610,6 +1852,7 @@ function tick(prev) {
       const rev = gm.weeklyBase * 0.45 * ((gm.health ?? 100) / 100) * rnd(0.85, 1.15);
       weekRevenue += rev;
       if (Math.random() < 0.3) s.fans += ri(1, 8);
+      weekChart.push({ id: gm.id, name: gm.name, rev, mine: true });
       return { ...gm, health: Math.max(0, (gm.health ?? 100) - 1.2), salesTotal: gm.salesTotal + rev, salesHistory: withHistory(gm, rev, null) };
     }
     if (gm.weeksLeft <= 0) return gm;
@@ -1617,11 +1860,30 @@ function tick(prev) {
     const rev = gm.weeklyBase * decay * rnd(0.8, 1.2);
     weekRevenue += rev;
     const units = gm.unitPrice ? Math.round(rev / gm.unitPrice) : null;
+    weekChart.push({ id: gm.id, name: gm.name, rev, mine: true });
     return {
       ...gm, weeksLeft: gm.weeksLeft - 1, salesTotal: gm.salesTotal + rev,
       unitsTotal: (gm.unitsTotal || 0) + (units || 0),
       salesHistory: withHistory(gm, rev, units),
     };
+  });
+
+  // ---- The weekly top-10 sales chart: your catalog vs the industry ----
+  for (const rr of s.rivalReleases || []) {
+    if (rr.wk == null) continue;
+    const age = s.week - rr.wk;
+    if (age < 0 || age > 15) continue;
+    weekChart.push({ name: rr.name, rev: Math.pow(rr.score / 10, 2.6) * 500 * (1 - age / 16), rivalName: rr.rivalName });
+  }
+  s.chart = weekChart.sort((a, b) => b.rev - a.rev).slice(0, 10).map((e, i) => ({ ...e, pos: i + 1, rev: Math.round(e.rev) }));
+  s.released = s.released.map(gm => {
+    const pos = s.chart.find(e => e.id === gm.id)?.pos;
+    if (!pos) return gm;
+    if (pos === 1) {
+      s.fans += 30; // the whole industry is talking about you
+      if (gm.chartPeak !== 1) s.log = pushLog(s, `🏆 "${gm.name}" is this week's #1 best-selling game in the world.`);
+    }
+    return { ...gm, chartPeak: gm.chartPeak == null ? pos : Math.min(gm.chartPeak, pos) };
   });
   s.money += weekRevenue - serverBills;
   if (s.yearStats) s.yearStats = { ...s.yearStats, revenue: (s.yearStats.revenue || 0) + weekRevenue };
@@ -2081,7 +2343,8 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
     const extras = (draft.extraPlatforms || []).filter(id => id !== draft.platform);
     const licenses = effLicense(prev, plat, prev.week) + extras.reduce((a, id) => a + effLicense(prev, platById(id), prev.week), 0);
     // Remakes pay full production cost now — nostalgia buys hype, not savings
-    const cost = Math.round(sizeCost(size, year) * (draft.ip ? 0.75 : 1)) + licenses + engFee; // IP entries reuse assets
+    const featW = featureWork(draft.features);
+    const cost = Math.round(sizeCost(size, year) * (draft.ip ? 0.75 : 1) * (1 + featW * 0.8)) + licenses + engFee; // IP entries reuse assets
     const slot = slotOf(draft.team || "A");
     if (prev.money < cost || prev[slot]) return prev;
     const startHype = (draft.ip ? Math.min(40, Math.round(draft.ip.fans / 100)) : 0) + (draft.remakeOf ? 25 : 0);
@@ -2092,11 +2355,12 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
       yearStats: ysAdd(ysAdd(prev.yearStats, "exp", "dev", cost), "rev", "funding", exclFund),
       tab: "dev",
       [slot]: (() => {
-        const totalWork = Math.round(size.weeks * workScale(plat.tech) * (1 + extras.length * 0.15));
+        const totalWork = Math.round(size.weeks * workScale(plat.tech) * (1 + extras.length * 0.15) * (1 + featW));
         return {
           ...draft, team: draft.team || "A", points: size.points, extraPlatforms: extras,
           progress: 0, totalWeeks: totalWork, maxWeekly: totalWork / size.minWeeks,
           bugs: 0, hype: Math.min(100, startHype), vision: 0, crunch: false, stage: "pre",
+          spend: cost, funding: exclFund, // the project's own books
         };
       })(),
       log: pushLog(prev, draft.remakeOf
@@ -2107,16 +2371,78 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
     };
   });
 
-  const marketPush = (team = "A") => update(prev => {
-    const slot = slotOf(team);
-    if (!prev[slot] || prev.money < 1500) return prev;
-    const boost = prev.tech.includes("mktdpt") ? 18 : 12;
+  const matchPoachOffer = () => update(prev => {
+    const o = prev.poachOffer;
+    const m = o && prev.staff.find(x => x.id === o.staffId);
+    if (!m) return { ...prev, poachOffer: null };
     return {
       ...prev,
-      money: prev.money - 1500,
-      yearStats: ysAdd(prev.yearStats, "exp", "marketing", 1500),
-      [slot]: { ...prev[slot], hype: Math.min(100, (prev[slot].hype || 0) + boost) },
-      log: pushLog(prev, `Marketing push! Hype +${boost}.`),
+      staff: prev.staff.map(x => x.id === m.id ? { ...x, salary: o.salary } : x),
+      poachOffer: null,
+      morale: Math.min(100, prev.morale + 2),
+      log: pushLog(prev, `🤝 You matched the offer — ${m.name} stays, at ${money$(o.salary)}/wk.`),
+    };
+  });
+
+  const declinePoachOffer = () => update(prev => {
+    const o = prev.poachOffer;
+    const m = o && prev.staff.find(x => x.id === o.staffId);
+    if (!m) return { ...prev, poachOffer: null };
+    return {
+      ...prev,
+      staff: prev.staff.filter(x => x.id !== m.id),
+      leadId: prev.leadId === m.id ? "founder" : prev.leadId,
+      poachOffer: null,
+      morale: Math.max(30, prev.morale - 4),
+      log: pushLog(prev, `🚪 You let ${m.name} walk to ${o.rival}. Payroll thanks you; the team doesn't.`),
+    };
+  });
+
+  const trainStaff = id => update(prev => {
+    const m = prev.staff.find(x => x.id === id);
+    const yr = yearOf(prev.week);
+    const cost = Math.round(2000 * (1 + (yr - 1984) * 0.05));
+    if (!m || m.training || m.resting || prev.money < cost) return prev;
+    return {
+      ...prev,
+      money: prev.money - cost,
+      yearStats: ysAdd(prev.yearStats, "exp", "hiring", cost),
+      staff: prev.staff.map(x => x.id === id ? { ...x, training: { until: prev.week + 4 } } : x),
+      log: pushLog(prev, `📚 ${m.name} heads to a 4-week masterclass (${money$(cost)}). Off the floor until it wraps.`),
+    };
+  });
+
+  const resolveGate = (team, choice) => update(prev => {
+    const slot = slotOf(team);
+    const p = prev[slot];
+    if (!p || !p.gateOpen || p.gateChoice) return prev;
+    const np = { ...p, gateOpen: false, gateChoice: choice };
+    let msg;
+    if (choice === "cut") {
+      np.totalWeeks = Math.max(np.progress + 1, np.totalWeeks * 0.88);
+      msg = `✂ Scope cut on "${p.name}" — content out, ship date in. Critics will notice the seams.`;
+    } else if (choice === "extend") {
+      np.totalWeeks = Math.round(np.totalWeeks * 1.12);
+      msg = `🗓 Schedule extended on "${p.name}" — the team gets room to do it right.`;
+    } else {
+      np.bugs = p.bugs + 4;
+      msg = `😤 "${p.name}" pushes on as planned — the bug tracker groans, but the date holds.`;
+    }
+    return { ...prev, [slot]: np, log: pushLog(prev, msg) };
+  });
+
+  const marketPush = (team = "A", channelId = "mag") => update(prev => {
+    const slot = slotOf(team);
+    const ch = MKT_CHANNELS.find(c => c.id === channelId) || MKT_CHANNELS[1];
+    if (!prev[slot] || prev.money < ch.cost) return prev;
+    const fit = channelFit(ch, prev[slot].genre);
+    const boost = Math.round(ch.boost * fit * (prev.tech.includes("mktdpt") ? 1.4 : 1));
+    return {
+      ...prev,
+      money: prev.money - ch.cost,
+      yearStats: ysAdd(prev.yearStats, "exp", "marketing", ch.cost),
+      [slot]: { ...prev[slot], hype: Math.min(100, (prev[slot].hype || 0) + boost), spend: (prev[slot].spend || 0) + ch.cost },
+      log: pushLog(prev, `📣 ${ch.name} campaign for "${prev[slot].name}" — ${fit >= 1.1 ? "right in front of its audience" : fit <= 0.8 ? "wrong crowd, money half-wasted" : "decent placement"}. Hype +${boost}.`),
     };
   });
 
@@ -2194,6 +2520,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
       unitPrice, unitsTotal: 0, salesHistory: [],
       extraPlatforms: p.extraPlatforms?.length ? [...p.extraPlatforms] : undefined,
       portedTo: p.extraPlatforms?.length ? [...p.extraPlatforms] : undefined, // day-one platforms can't be ported to again
+      spend: p.spend || 0, funding: p.funding || 0, bugsAtLaunch: Math.round(p.bugs || 0),
       year: yearOf(prev.week),
       hue: ri(0, 360),
     };
@@ -2301,6 +2628,11 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
       holders = { ...holders, [platObj.holder]: { rel: Math.max(0, Math.min(100, hRel0 + hD)) } };
     }
     const launchBonus = holderLog ? 8000 : 0;
+    rec.funding = (rec.funding || 0) + launchBonus;
+    // Releasing on your own hardware sells hardware
+    const consoles = platObj?.own
+      ? (prev.consoles || []).map(c => c.id === platObj.id ? { ...c, share: Math.min(0.45, c.share + (score >= 70 ? 0.03 : 0.015)) } : c)
+      : (prev.consoles || []);
 
     // Settle with the publisher: relationships remember everything
     let pubLog = null, clawback = 0, publishers = prev.publishers;
@@ -2335,6 +2667,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
       money: prev.money - clawback + launchBonus,
       yearStats: ysAdd(ysAdd(prev.yearStats, "exp", "biz", clawback), "rev", "funding", launchBonus),
       holders,
+      consoles,
       [slot]: null,
       released: [rec, ...prev.released],
       fans: prev.fans + fanGain,
@@ -2507,7 +2840,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
       ...prev,
       money: prev.money - cost,
       yearStats: ysAdd(prev.yearStats, "exp", "liveops", cost),
-      released: prev.released.map(x => x.id === gameId ? { ...x, health: Math.min(100, (x.health ?? 0) + 30) } : x),
+      released: prev.released.map(x => x.id === gameId ? { ...x, health: Math.min(100, (x.health ?? 0) + 30), spend: (x.spend || 0) + cost } : x),
       log: pushLog(prev, `🌐 Content update shipped for "${g.name}" — the player base is buzzing again.`),
     };
   });
@@ -2533,10 +2866,40 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
       money: prev.money - cost,
       yearStats: ysAdd(prev.yearStats, "exp", "liveops", cost),
       released: prev.released.map(x => x.id === gameId
-        ? { ...x, health: Math.min(100, (x.health ?? 0) + 45), subs: Math.min(x.subCap || Infinity, Math.round((x.subs || 0) * 1.35)), bleeding: false }
+        ? { ...x, health: Math.min(100, (x.health ?? 0) + 45), subs: Math.min(x.subCap || Infinity, Math.round((x.subs || 0) * 1.35)), bleeding: false, spend: (x.spend || 0) + cost }
         : x),
       fans: prev.fans + ri(50, 150),
       log: pushLog(prev, `📦 "${g.name}" expansion launched — lapsed subscribers are reinstalling.`),
+    };
+  });
+
+  const patchGame = gameId => update(prev => {
+    const g = prev.released.find(x => x.id === gameId);
+    const yr = yearOf(prev.week);
+    const cost = Math.round(1500 * (1 + (yr - 1984) * 0.05));
+    if (!g || g.patched || (g.bugsAtLaunch || 0) <= 5 || g.weeksLeft <= 0 || prev.money < cost) return prev;
+    return {
+      ...prev,
+      money: prev.money - cost,
+      yearStats: ysAdd(prev.yearStats, "exp", "liveops", cost),
+      rep: Math.min(100, (prev.rep ?? 50) + 1),
+      released: prev.released.map(x => x.id === gameId ? { ...x, patched: true, weeklyBase: x.weeklyBase * 1.15, spend: (x.spend || 0) + cost } : x),
+      log: pushLog(prev, `🩹 Patch shipped for "${g.name}" — word of mouth recovers (+15% weekly sales), and the fans notice you care.`),
+    };
+  });
+
+  const startDlc = gameId => update(prev => {
+    const g = prev.released.find(x => x.id === gameId);
+    const yr = yearOf(prev.week);
+    const size = SIZES.find(z => z.id === g?.size) || SIZES[0];
+    const cost = Math.round(sizeCost(size, yr) * 0.3);
+    if (!g || !prev.tech.includes("dlc") || g.live || g.port || g.dlcUntil || (g.dlcCount || 0) >= 2 || g.score < 65 || prev.money < cost) return prev;
+    return {
+      ...prev,
+      money: prev.money - cost,
+      yearStats: ysAdd(prev.yearStats, "exp", "dev", cost),
+      released: prev.released.map(x => x.id === gameId ? { ...x, dlcUntil: prev.week + ri(6, 9), spend: (x.spend || 0) + cost } : x),
+      log: pushLog(prev, `📦 DLC greenlit for "${g.name}" — a small crew peels off to build it (${money$(cost)}).`),
     };
   });
 
@@ -2561,7 +2924,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
       name: `${g.name} (${target.name})`,
       platform: platId, port: true, portedTo: undefined, rereleased: true, goty: false,
       weeklyBase: portWeekly, weeksLeft: weeks, weeksTotal: weeks, salesTotal: 0,
-      unitsTotal: 0, salesHistory: [],
+      unitsTotal: 0, salesHistory: [], spend: cost, funding: 0,
       year: year2, live: false, health: undefined, sunset: undefined,
     };
     // Holder likes seeing your catalog arrive
@@ -2591,7 +2954,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
       yearStats: ysAdd(prev.yearStats, "exp", "dev", cost),
       fans: prev.fans + 100,
       released: prev.released.map(x => x.id === gameId
-        ? { ...x, rereleased: true, weeksLeft: 8, weeksTotal: 8, weeklyBase: x.weeklyBase * 0.35 }
+        ? { ...x, rereleased: true, weeksLeft: 8, weeksTotal: 8, weeklyBase: x.weeklyBase * 0.35, spend: (x.spend || 0) + cost }
         : x),
       log: pushLog(prev, `💿 "${g.name}" is back on shelves as a Greatest Hits budget re-release.`),
     };
@@ -2602,6 +2965,64 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
     if (t.req && !prev.engineTechs.includes(t.req)) return prev;
     if (t.yr && yearOf(prev.week) < t.yr) return prev;
     return { ...prev, rp: prev.rp - t.cost, engineTechs: [...prev.engineTechs, t.id], log: pushLog(prev, `🔬 Engine tech researched: ${t.name}. Build it into an engine to use it.`) };
+  });
+
+  const startConsole = name => update(prev => {
+    const clean = (name || "").trim();
+    const year = yearOf(prev.week);
+    const cost = Math.round(200000 * (1 + (year - 1984) * 0.05));
+    if (!clean || prev.consoleProject || prev.money < cost || (prev.rep ?? 50) < 60) return prev;
+    if ((prev.consoles || []).some(c => year <= platEnd(prev, c))) return prev; // one live console at a time
+    return {
+      ...prev,
+      money: prev.money - cost,
+      yearStats: ysAdd(prev.yearStats, "exp", "hardware", cost),
+      consoleProject: { name: clean, done: prev.week + 30, cost },
+      log: pushLog(prev, `🕹 Hardware division spun up — the "${clean}" enters development for ${money$(cost)}. Launch in ~30 weeks.`),
+    };
+  });
+
+  const signExclusive = rivalId => update(prev => {
+    const r = prev.rivals[rivalId];
+    const year = yearOf(prev.week);
+    const oc = (prev.consoles || []).find(c => year >= c.yr && year <= platEnd(prev, c));
+    const cost = Math.round((10000 + (r?.prestige || 0) * 1.5) * (1 + (year - 1984) * 0.03));
+    if (!r || r.defunct || !r.active || r.ownedByYou || r.moneyhat || !oc || prev.money < cost) return prev;
+    return {
+      ...prev,
+      money: prev.money - cost,
+      yearStats: ysAdd(prev.yearStats, "exp", "hardware", cost),
+      rivals: { ...prev.rivals, [rivalId]: { ...r, moneyhat: oc.id, nextRelease: Math.min(r.nextRelease, prev.week + 12) } },
+      log: pushLog(prev, `🤝 Moneyhat signed: ${r.name}'s next game ships exclusively on the ${oc.name}.`),
+    };
+  });
+
+  const consolePriceCut = () => update(prev => {
+    const year = yearOf(prev.week);
+    const oc = (prev.consoles || []).find(c => year >= c.yr && year <= platEnd(prev, c));
+    const cost = Math.round(30000 * (1 + (year - 1984) * 0.05));
+    if (!oc || prev.money < cost || (oc.lastCut && prev.week - oc.lastCut < 52)) return prev;
+    return {
+      ...prev,
+      money: prev.money - cost,
+      yearStats: ysAdd(prev.yearStats, "exp", "hardware", cost),
+      consoles: prev.consoles.map(c => c.id === oc.id ? { ...c, share: Math.min(0.45, c.share + 0.05), lastCut: prev.week } : c),
+      log: pushLog(prev, `💸 ${oc.name} price cut — every unit now ships at a loss, but the market share needle jumps.`),
+    };
+  });
+
+  const consoleSlim = () => update(prev => {
+    const year = yearOf(prev.week);
+    const oc = (prev.consoles || []).find(c => year >= c.yr && year <= platEnd(prev, c));
+    const cost = Math.round(60000 * (1 + (year - 1984) * 0.05));
+    if (!oc || oc.slim || year < oc.yr + 4 || prev.money < cost) return prev;
+    return {
+      ...prev,
+      money: prev.money - cost,
+      yearStats: ysAdd(prev.yearStats, "exp", "hardware", cost),
+      consoles: prev.consoles.map(c => c.id === oc.id ? { ...c, slim: true, end: c.end + 3, share: Math.min(0.45, c.share + 0.03) } : c),
+      log: pushLog(prev, `📐 The ${oc.name} Slim ships — cheaper to build, fresh on the shelf. The generation stretches three more years.`),
+    };
   });
 
   const buildEngine = name => update(prev => {
@@ -3119,7 +3540,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
   const office = OFFICES[s.office];
   const nextOffice = OFFICES[s.office + 1];
   const weeklyCost = s.staff.reduce((a, m) => a + m.salary, 0) + office.rent;
-  const activePlatforms = PLATFORMS.filter(p => p.yr <= year && platEnd(s, p) >= year);
+  const activePlatforms = [...PLATFORMS, ...(s.consoles || [])].filter(p => p.yr <= year && platEnd(s, p) >= year);
   const activeTopics = TOPICS.filter(t => t.yr <= year);
 
   const tabs = [
@@ -3205,11 +3626,11 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
       </div>
 
       {s.tab === "studio"   && <StudioTab s={s} nextOffice={nextOffice} upgradeOffice={upgradeOffice} acceptContract={acceptContract} abandonContract={abandonContract} fundPitch={fundPitch} />}
-      {s.tab === "dev"      && <DevTab s={s} startProject={startProject} releaseGame={releaseGame} marketPush={marketPush} setPrice={setPrice} setBiz={setBiz} setLive={setLive} setMmo={setMmo} toggleCrunch={toggleCrunch} activePlatforms={activePlatforms} activeTopics={activeTopics} year={year} />}
-      {s.tab === "team"     && <TeamTab s={s} hire={hire} fire={fire} office={office} recruitAd={recruitAd} recruitHeadhunter={recruitHeadhunter} poachRival={poachRival} toggleRest={toggleRest} setLead={setLead} assignTeam={assignTeam} />}
-      {s.tab === "research" && <ResearchTab s={s} buyTech={buyTech} buyEngineTech={buyEngineTech} buildEngine={buildEngine} updateEngine={updateEngine} toggleEngineLicense={toggleEngineLicense} licenseRivalEngine={licenseRivalEngine} />}
+      {s.tab === "dev"      && <DevTab s={s} startProject={startProject} releaseGame={releaseGame} marketPush={marketPush} setPrice={setPrice} setBiz={setBiz} setLive={setLive} setMmo={setMmo} toggleCrunch={toggleCrunch} resolveGate={resolveGate} activePlatforms={activePlatforms} activeTopics={activeTopics} year={year} />}
+      {s.tab === "team"     && <TeamTab s={s} hire={hire} fire={fire} office={office} recruitAd={recruitAd} recruitHeadhunter={recruitHeadhunter} poachRival={poachRival} toggleRest={toggleRest} setLead={setLead} assignTeam={assignTeam} trainStaff={trainStaff} matchPoachOffer={matchPoachOffer} declinePoachOffer={declinePoachOffer} />}
+      {s.tab === "research" && <ResearchTab s={s} buyTech={buyTech} buyEngineTech={buyEngineTech} buildEngine={buildEngine} updateEngine={updateEngine} toggleEngineLicense={toggleEngineLicense} licenseRivalEngine={licenseRivalEngine} startConsole={startConsole} signExclusive={signExclusive} consolePriceCut={consolePriceCut} consoleSlim={consoleSlim} />}
       {s.tab === "ip"       && <IpTab s={s} sellIp={sellIp} buyIp={buyIp} renameIp={renameIp} buybackPubIp={buybackPubIp} openTalks={openTalks} orderSequel={orderSequel} injectCapital={injectCapital} absorbSubsidiary={absorbSubsidiary} sellSubsidiary={sellSubsidiary} />}
-      {s.tab === "shelf"    && <ShelfTab s={s} rerelease={rerelease} portGame={portGame} liveUpdate={liveUpdate} sunsetLive={sunsetLive} shipExpansion={shipExpansion} />}
+      {s.tab === "shelf"    && <ShelfTab s={s} rerelease={rerelease} portGame={portGame} liveUpdate={liveUpdate} sunsetLive={sunsetLive} shipExpansion={shipExpansion} patchGame={patchGame} startDlc={startDlc} />}
       {s.tab === "stats"    && <StatsTab s={s} />}
 
       {/* NEXT WEEK — pinned to the bottom of the screen, easy to thumb */}
@@ -3470,6 +3891,25 @@ function StudioTab({ s, nextOffice, upgradeOffice, acceptContract, abandonContra
   const c = s.contracts?.active;
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 14 }}>
+      {(s.chart || []).length > 0 && (
+        <Panel title="THIS WEEK'S TOP 10" accent={C.gold}>
+          {s.chart.map(e => (
+            <div key={e.pos} style={{
+              display: "flex", alignItems: "center", gap: 10, padding: "5px 8px", borderRadius: 8, marginBottom: 2,
+              background: e.mine ? "#3A2050" : "transparent",
+            }}>
+              <div style={{ fontFamily: "'Bungee', cursive", fontSize: 14, color: e.pos === 1 ? C.gold : e.mine ? C.mag : C.dim, width: 28 }}>#{e.pos}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: e.mine ? C.ink : C.dim, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {e.name}{e.mine ? " ⭐" : ""}
+                </div>
+                <div style={{ fontSize: 11, color: C.dim }}>{e.mine ? "Your studio" : e.rivalName}</div>
+              </div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: e.mine ? C.green : C.dim }}>{money$(e.rev)}/wk</div>
+            </div>
+          ))}
+        </Panel>
+      )}
       <Panel title="THIS WEEK" accent={C.mag}>
         {s.trend && (
           <div style={{ fontSize: 14, color: C.mag, fontWeight: 700, marginBottom: 10 }}>
@@ -3690,7 +4130,7 @@ function Meter({ label, pct, color }) {
   );
 }
 
-function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, setLive, setMmo, toggleCrunch, activePlatforms, activeTopics, year }) {
+function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, setLive, setMmo, toggleCrunch, resolveGate, activePlatforms, activeTopics, year }) {
   const twoTeams = s.office >= 3;
   const [team, setTeam] = useState("A");
   const slot = team === "B" ? "projectB" : "project";
@@ -3704,6 +4144,7 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, se
     remakeOf: null, // { id, name, score, year }
     exclusive: false,
     extraPlatforms: [], // simultaneous-release platforms (multiplat tech)
+    features: [],       // feature checklist (engine-gated)
   }));
   const [launchPub, setLaunchPub] = useState(null); // { name } — publisher signing the FINISHED game; null = self-publish
   const [topicPicker, setTopicPicker] = useState(false); // full topic list modal
@@ -3774,6 +4215,34 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, se
             const eng = resolveEngine(s, p.engine);
             return <div style={{ fontSize: 13, color: C.dim, marginTop: 4 }}>🔧 {eng ? `${eng.name} · power ${eng.power}` : "No engine — raw code"}</div>;
           })()}
+          {(() => {
+            const fit = stageTeamFit(s.staff, p.team || "A", p.stage);
+            const stageName = { pre: "Pre-production", alpha: "Alpha", beta: "Beta", polish: "Polish" }[p.stage] || p.stage;
+            return (
+              <div style={{ fontSize: 13, color: fit >= 1.05 ? C.green : fit >= 0.9 ? C.dim : C.red, marginTop: 4 }}>
+                🎯 {stageName} leans on {(STAGE_SKILLS[p.stage] || STAGE_SKILLS.alpha).lean} — team fit ×{fit.toFixed(2)}
+              </div>
+            );
+          })()}
+          {p.gateOpen && !p.gateChoice && (
+            <div style={{ background: "#3A2E10", border: `2px solid ${C.gold}`, borderRadius: 12, padding: 12, marginTop: 10 }}>
+              <div style={{ fontWeight: 800, marginBottom: 4 }}>📋 ALPHA REVIEW — your call</div>
+              <div style={{ fontSize: 12, color: C.dim, marginBottom: 8 }}>
+                The build is feature-complete and the back half is where schedules die. How do you play it?
+              </div>
+              <div style={{ display: "grid", gap: 6 }}>
+                <Btn small kind="ghost" color={C.red} onClick={() => resolveGate(team, "cut")} style={{ width: "100%" }}>
+                  ✂ Cut scope — ship ~12% sooner, −3 review score
+                </Btn>
+                <Btn small kind="ghost" color={C.green} onClick={() => resolveGate(team, "extend")} style={{ width: "100%" }}>
+                  🗓 Extend — ~12% more work, +3 review score
+                </Btn>
+                <Btn small kind="ghost" color={C.gold} onClick={() => resolveGate(team, "push")} style={{ width: "100%" }}>
+                  😤 Push on — on time, on budget, +4 bugs
+                </Btn>
+              </div>
+            </div>
+          )}
           {p.stage === "polish" && (
             <div style={{ marginTop: 14, fontSize: 15, color: C.dim, lineHeight: 1.5 }}>
               Each week of polish squashes bugs, but hype slowly fades. Release when bugs are low and hype is high.
@@ -3791,9 +4260,25 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, se
           </button>
         </Panel>
         <Panel title="LAUNCH CONTROL" accent={C.gold}>
-          <Btn small color={C.mag} disabled={s.money < 1500} onClick={() => marketPush(team)} style={{ width: "100%", marginBottom: 12 }}>
-            📣 Marketing push — $1,500
-          </Btn>
+          <div style={{ fontSize: 13, color: C.dim, letterSpacing: 1, margin: "0 0 6px" }}>MARKETING — PICK THE CROWD</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 12 }}>
+            {MKT_CHANNELS.map(ch => {
+              const fit = channelFit(ch, p.genre);
+              const gain = Math.round(ch.boost * fit * (s.tech.includes("mktdpt") ? 1.4 : 1));
+              return (
+                <button key={ch.id} disabled={s.money < ch.cost} onClick={() => marketPush(team, ch.id)} style={{
+                  padding: "8px 6px", minHeight: 52, borderRadius: 10, cursor: s.money < ch.cost ? "default" : "pointer",
+                  border: `2px solid ${C.line}`, background: C.panelHi, color: s.money < ch.cost ? C.dim : C.ink,
+                  fontFamily: "'Rubik', sans-serif", fontSize: 12, fontWeight: 700, touchAction: "manipulation",
+                }}>
+                  📣 {ch.name}
+                  <div style={{ fontSize: 10, color: fit >= 1.1 ? C.green : fit <= 0.8 ? C.red : C.dim, fontWeight: 400, marginTop: 2 }}>
+                    {money$(ch.cost)} · hype +{gain}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
           {band && (
             <div style={{ background: C.panelHi, borderRadius: 12, padding: "10px 14px", marginBottom: 12, fontSize: 14 }}>
               🔬 Focus testers predict: <b style={{ color: band[1] >= 75 ? C.gold : band[1] >= 55 ? C.cyan : C.red, fontFamily: "'Bungee', cursive" }}>{band[0]}–{band[1]}</b> <span style={{ color: C.dim }}>/ 100</span>
@@ -3921,7 +4406,8 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, se
   const left = size.points - spent;
   const plat = platById(draft.platform);
   const extraPlats = draft.extraPlatforms || [];
-  const devCost = Math.round(sizeCost(size, year) * (draft.ip ? 0.75 : 1));
+  const featW = featureWork(draft.features);
+  const devCost = Math.round(sizeCost(size, year) * (draft.ip ? 0.75 : 1) * (1 + featW * 0.8));
   const draftEngine = resolveEngine(s, draft.engine);
   const engFee = draft.engine && draft.engine.startsWith("lic:") ? (draftEngine?.perGame || 0) : 0;
   const cost = devCost + effLicense(s, plat, s.week) + extraPlats.reduce((a, id) => a + effLicense(s, platById(id), s.week), 0) + engFee;
@@ -4084,6 +4570,11 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, se
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
           {GENRES.map(gg => chip(draft.genre === gg.id, () => setDraft(v => ({ ...v, genre: gg.id })), gg.name))}
         </div>
+        {GENRE_AUD[draft.genre] && (
+          <div style={{ fontSize: 12, color: C.dim, marginTop: 6 }}>
+            👥 Who buys {genreById(draft.genre).name.toLowerCase()}: {SEGMENTS.map(([k, label]) => `${label} ${Math.round(GENRE_AUD[draft.genre][k] * 100)}%`).join(" · ")}
+          </div>
+        )}
         <div style={{ fontSize: 13, color: C.dim, margin: "14px 0 6px", letterSpacing: 1 }}>TOPIC</div>
         <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
           <div style={{
@@ -4149,9 +4640,11 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, se
             const fate = platFate(s, pp);
             const phase = platPhase(s, pp, s.week);
             const verdict = fate.revealed && fate.verdict === "hit" ? " · 🚀 winning the war" : fate.revealed && fate.verdict === "flop" ? " · 💀 flopping" : "";
+            const fit = audienceFit(draft.genre, pp.id);
+            const fitTag = fit >= 1.1 ? "👥 great audience fit" : fit >= 0.95 ? "👥 fine audience fit" : "👥 poor audience fit";
             return chip(draft.platform === pp.id, () => setDraft(v => ({ ...v, platform: pp.id, exclusive: false, extraPlatforms: (v.extraPlatforms || []).filter(x => x !== pp.id) })),
               `${pp.name} · lic ${money$(effLicense(s, pp, s.week))}`,
-              `${Math.round(platShareNow(s, pp, s.week) * 100)}% market · ${phase}${verdict} — ${pp.blurb}`);
+              `${Math.round(platShareNow(s, pp, s.week) * 100)}% market · ${phase}${verdict} · ${fitTag} — ${pp.blurb}`);
           })}
         </div>
         {s.tech.includes("multiplat") && (
@@ -4211,6 +4704,37 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, se
             ...v, size: z.id, alloc: normalizeAlloc(v.alloc, z.points),
           })), z.name, `${Math.round(z.weeks * workScale(plat.tech))} work · min ${z.minWeeks}w · dev ${money$(sizeCost(z, year))}`))}
         </div>
+        {(() => {
+          const engParts = resolveEngine(s, draft.engine)?.parts || [];
+          const avail = GAME_FEATURES.filter(f => f.yr <= year);
+          if (!avail.length) return null;
+          return (
+            <>
+              <div style={{ fontSize: 13, color: C.dim, margin: "14px 0 6px", letterSpacing: 1 }}>
+                FEATURES{featW > 0 ? <span> — <b style={{ color: C.gold }}>+{Math.round(featW * 100)}% work & budget</b></span> : ""}
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 6 }}>
+                {avail.map(f => {
+                  const lockPart = f.req ? ENGINE_TECHS.find(t => t.id === f.req) : null;
+                  const locked = f.req && !engParts.includes(f.req);
+                  const on = (draft.features || []).includes(f.id);
+                  return (
+                    <button key={f.id} disabled={locked} onClick={() => setDraft(v => ({ ...v, features: on ? (v.features || []).filter(x => x !== f.id) : [...(v.features || []), f.id] }))} style={{
+                      padding: "9px 10px", minHeight: 48, borderRadius: 10, cursor: locked ? "default" : "pointer", textAlign: "left",
+                      border: `2px solid ${on ? C.gold : C.line}`, background: on ? "#3A3110" : C.panelHi,
+                      color: C.ink, fontFamily: "'Rubik', sans-serif", fontSize: 13, fontWeight: 700, touchAction: "manipulation", opacity: locked ? 0.45 : 1,
+                    }}>
+                      {on ? "✓ " : ""}{f.name}
+                      <div style={{ fontSize: 10, color: C.dim, fontWeight: 400, marginTop: 2 }}>
+                        {locked ? `engine needs ${lockPart?.name || f.req}` : `+${Math.round(f.work * 100)}% work · quality +${f.score}`}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          );
+        })()}
       </Panel>
 
       <Panel title="3 · DEV FOCUS" accent={C.gold} style={{ gridColumn: "1 / -1" }}>
@@ -4235,7 +4759,7 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, se
         <div style={{ marginTop: 18, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
           <div style={{ fontSize: 16 }}>
             {(() => {
-              const work = Math.round(size.weeks * workScale(plat.tech) * (1 + extraPlats.length * 0.15));
+              const work = Math.round(size.weeks * workScale(plat.tech) * (1 + extraPlats.length * 0.15) * (1 + featW));
               const out = effTeamOutput(s.staff, team, s.tech.includes("devtools") ? 1.1 : 1) || 0.1;
               const est = Math.max(size.minWeeks, Math.ceil(work / out));
               return (
@@ -4276,7 +4800,7 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, se
   );
 }
 
-function TeamTab({ s, hire, fire, office, recruitAd, recruitHeadhunter, poachRival, toggleRest, setLead, assignTeam }) {
+function TeamTab({ s, hire, fire, office, recruitAd, recruitHeadhunter, poachRival, toggleRest, setLead, assignTeam, trainStaff, matchPoachOffer, declinePoachOffer }) {
   const yr = yearOf(s.week);
   const disc = s.tech.includes("talent") ? 0.7 : 1;
   const adCost = Math.round(400 * (1 + (yr - 1984) * 0.06) * disc);
@@ -4291,6 +4815,18 @@ function TeamTab({ s, hire, fire, office, recruitAd, recruitHeadhunter, poachRiv
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 14 }}>
       <Panel title={`YOUR TEAM · ${s.staff.length}/${office.cap}`} accent={C.cyan}>
+        {s.poachOffer && s.staff.some(m => m.id === s.poachOffer.staffId) && (
+          <div style={{ background: "#3E1220", border: `2px solid ${C.red}`, borderRadius: 12, padding: 12, marginBottom: 12 }}>
+            <div style={{ fontWeight: 800, marginBottom: 4 }}>📞 {s.poachOffer.rival} wants {s.poachOffer.name}</div>
+            <div style={{ fontSize: 13, color: C.dim, marginBottom: 8 }}>
+              They're offering {money$(s.poachOffer.salary)}/wk. Answer within {Math.max(0, s.poachOffer.deadline - s.week)} week{s.poachOffer.deadline - s.week === 1 ? "" : "s"} or they're gone.
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Btn small color={C.green} disabled={s.money < 0} onClick={matchPoachOffer}>🤝 Match — {money$(s.poachOffer.salary)}/wk</Btn>
+              <Btn small kind="ghost" color={C.red} onClick={declinePoachOffer}>🚪 Let them walk</Btn>
+            </div>
+          </div>
+        )}
         {s.staff.map(m => {
           const energy = Math.round(m.energy ?? 100);
           const isLead = s.leadId === m.id;
@@ -4302,7 +4838,7 @@ function TeamTab({ s, hire, fire, office, recruitAd, recruitHeadhunter, poachRiv
                     <button onClick={() => setLead(m.id)} title="Make lead" style={{ background: "none", border: "none", cursor: "pointer", fontSize: 15, padding: "2px 4px", opacity: isLead ? 1 : 0.3 }}>👑</button>
                     {m.name} <span style={{ color: C.gold, fontSize: 12 }}>Lv{m.level ?? 1}</span>
                   </div>
-                  <div style={{ fontSize: 12, color: C.dim }}>{m.role} · {money$(m.salary)}/wk{m.trait ? ` · ${TRAITS[m.trait]?.name}` : ""}</div>
+                  <div style={{ fontSize: 12, color: C.dim }}>{m.role} · {Math.floor(m.age ?? 30)}y{(m.age ?? 30) >= 59 ? " ⏳" : ""} · {money$(m.salary)}/wk{m.trait ? ` · ${TRAITS[m.trait]?.name}` : ""}</div>
                 </div>
                 <div style={{ display: "flex", gap: 14 }}>
                   <StatPip label="Code" v={m.code} /><StatPip label="Dsgn" v={m.design} /><StatPip label="Art" v={m.art} /><StatPip label="Snd" v={m.sound} />
@@ -4314,6 +4850,7 @@ function TeamTab({ s, hire, fire, office, recruitAd, recruitHeadhunter, poachRiv
                     </Btn>
                   )}
                   <Btn small kind="ghost" onClick={() => toggleRest(m.id)}>{m.resting ? "Return" : "Rest"}</Btn>
+                  <Btn small kind="ghost" color={C.gold} disabled={!!m.training || m.resting || s.money < Math.round(2000 * (1 + (yr - 1984) * 0.05))} onClick={() => trainStaff(m.id)}>📚</Btn>
                   {m.id !== "founder" && <Btn small kind="ghost" color={C.red} onClick={() => fire(m.id)} style={{ color: C.red }}>✕</Btn>}
                 </div>
               </div>
@@ -4322,14 +4859,25 @@ function TeamTab({ s, hire, fire, office, recruitAd, recruitHeadhunter, poachRiv
                   <div style={{ width: `${energy}%`, height: "100%", background: energy < 20 ? C.red : energy < 50 ? C.gold : C.green }} />
                 </div>
                 <span style={{ fontSize: 11, color: energy < 20 ? C.red : C.dim, width: 84, flexShrink: 0 }}>
-                  {m.resting ? "Resting" : energy < 20 ? "🔥 Burned out" : `Energy ${energy}%`}
+                  {m.training ? `📚 Training ${Math.max(0, m.training.until - s.week)}w` : m.resting ? "Resting" : energy < 20 ? "🔥 Burned out" : `Energy ${energy}%`}
                 </span>
               </div>
             </div>
           );
         })}
-        <div style={{ fontSize: 12, color: C.dim, marginTop: 8 }}>👑 The lead's skills weight their team's projects 30% and they earn double XP. Burned-out staff (energy under 20%) work at half speed — Rest to recover.{s.office >= 3 ? " A/B assigns each person to a dev team — each team runs its own project." : ""}</div>
+        <div style={{ fontSize: 12, color: C.dim, marginTop: 8 }}>👑 The lead's skills weight their team's projects 30% and they earn double XP. Burned-out staff (energy under 20%) work at half speed — Rest to recover. 📚 sends someone to a 4-week masterclass (+1 to their best stat). Veterans retire around 60.{s.office >= 3 ? " A/B assigns each person to a dev team — each team runs its own project." : ""}</div>
       </Panel>
+      {(s.hallOfFame || []).length > 0 && (
+        <Panel title="STUDIO HALL OF FAME" accent={C.gold}>
+          <div style={{ fontSize: 13, color: C.dim, marginBottom: 8 }}>Names on the lobby wall — the people who built this place.</div>
+          {s.hallOfFame.map((h, i) => (
+            <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: `1px solid ${C.line}`, fontSize: 14 }}>
+              <span style={{ fontWeight: 700 }}>🎓 {h.name}</span>
+              <span style={{ color: C.dim }}>{h.role} · Lv{h.level} · retired {h.year}</span>
+            </div>
+          ))}
+        </Panel>
+      )}
       <Panel title="RECRUITING" accent={C.gold}>
         <div style={{ fontSize: 13, color: C.dim, marginBottom: 12 }}>Applicants don't come to you — go find them. Signing bonus on hire = 4 weeks' salary.</div>
         <div style={{ display: "grid", gap: 8, marginBottom: 16 }}>
@@ -4381,15 +4929,88 @@ function TeamTab({ s, hire, fire, office, recruitAd, recruitHeadhunter, poachRiv
   );
 }
 
-function ResearchTab({ s, buyTech, buyEngineTech, buildEngine, updateEngine, toggleEngineLicense, licenseRivalEngine }) {
+function ResearchTab({ s, buyTech, buyEngineTech, buildEngine, updateEngine, toggleEngineLicense, licenseRivalEngine, startConsole, signExclusive, consolePriceCut, consoleSlim }) {
   const year = yearOf(s.week);
   const [engineName, setEngineName] = useState("");
+  const [consoleName, setConsoleName] = useState("");
   const researchedPower = enginePowerFromParts(s.engineTechs || []);
   const buildCost = 3000 + researchedPower * 150;
   const era = eraPower(year);
+  const hwCost = Math.round(200000 * (1 + (year - 1984) * 0.05));
+  const liveConsole = (s.consoles || []).find(c => year <= platEnd(s, c));
+  const pastConsoles = (s.consoles || []).filter(c => year > platEnd(s, c));
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
+      {/* ---- HARDWARE DIVISION ---- */}
+      <Panel title="HARDWARE DIVISION" accent={C.gold}>
+        {liveConsole ? (() => {
+          const share = Math.round(platShareNow(s, liveConsole, s.week) * 100);
+          const firstParty = s.released.filter(g => g.platform === liveConsole.id || (g.extraPlatforms || []).includes(liveConsole.id)).length;
+          return (
+            <div>
+              <div style={{ fontFamily: "'Bungee', cursive", fontSize: 20, color: C.gold, marginBottom: 6 }}>🕹 {liveConsole.name}</div>
+              <Row k="Market share" v={`${share}%`} color={C.cyan} />
+              <Row k="Phase" v={platPhase(s, liveConsole, s.week)} />
+              <Row k="Generation ends" v={`~${platEnd(s, liveConsole)}`} color={C.dim} />
+              <Row k="First-party releases" v={firstParty} color={C.mag} />
+              <Row k="Third-party royalties" v={money$(s.consoleRoyalties || 0)} color={C.green} />
+              <div style={{ fontSize: 13, color: C.dim, marginTop: 8 }}>
+                Every first-party release grows the install base (hits grow it faster), and rival studios shipping on your machine pay royalties. No license fees on your own hardware.
+              </div>
+              {(() => {
+                const cutCost = Math.round(30000 * (1 + (year - 1984) * 0.05));
+                const slimCost = Math.round(60000 * (1 + (year - 1984) * 0.05));
+                const cutWait = liveConsole.lastCut ? Math.max(0, 52 - (s.week - liveConsole.lastCut)) : 0;
+                return (
+                  <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                    <Btn small kind="ghost" color={C.gold} disabled={s.money < cutCost || cutWait > 0} onClick={consolePriceCut}>
+                      💸 Price cut · {money$(cutCost)} {cutWait > 0 ? `(ready in ${cutWait}w)` : "(+5% share)"}
+                    </Btn>
+                    {!liveConsole.slim && (
+                      <Btn small kind="ghost" color={C.cyan} disabled={year < liveConsole.yr + 4 || s.money < slimCost} onClick={consoleSlim}>
+                        📐 Slim revision · {money$(slimCost)} {year < liveConsole.yr + 4 ? `(from ${liveConsole.yr + 4})` : "(+3 years, +3% share)"}
+                      </Btn>
+                    )}
+                  </div>
+                );
+              })()}
+              <div style={{ fontSize: 12, color: C.dim, letterSpacing: 1, margin: "14px 0 6px" }}>🤝 MONEYHAT AN EXCLUSIVE</div>
+              <div style={{ display: "grid", gap: 6 }}>
+                {independentRivals(s).sort((a, b) => b.prestige - a.prestige).slice(0, 4).map(r => {
+                  const cost = Math.round((10000 + r.prestige * 1.5) * (1 + (year - 1984) * 0.03));
+                  return (
+                    <Btn key={r.id} small kind="ghost" color={C.mag} disabled={!!r.moneyhat || s.money < cost} onClick={() => signExclusive(r.id)} style={{ width: "100%" }}>
+                      {r.moneyhat ? `✓ ${r.name} — exclusive signed` : `${r.name} · ${money$(cost)}`} <span style={{ color: C.dim, fontWeight: 400 }}>their next game ships only on your {liveConsole.name}</span>
+                    </Btn>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })() : s.consoleProject ? (
+          <div>
+            <div style={{ fontFamily: "'Bungee', cursive", fontSize: 18, color: C.gold, marginBottom: 6 }}>🕹 {s.consoleProject.name} — in development</div>
+            <Meter label={`Launch in ${Math.max(0, s.consoleProject.done - s.week)} weeks`} pct={Math.min(100, 100 - ((s.consoleProject.done - s.week) / 30) * 100)} color={C.gold} />
+          </div>
+        ) : (
+          <div>
+            <div style={{ fontSize: 14, color: C.dim, marginBottom: 12 }}>
+              The endgame move: build your own console. {money$(hwCost)} and ~30 weeks buys a machine at the current tech tier with a ~9-year generation. First-party hits grow its market share, and every third-party release pays you royalties. Requires reputation 60+{pastConsoles.length ? ` — the ${pastConsoles[pastConsoles.length - 1].name} generation has ended; time for a successor` : ""}.
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input value={consoleName} placeholder="Console name"
+                onChange={e => setConsoleName(e.target.value)}
+                style={{ flex: 1, fontSize: 16, padding: "10px 12px", borderRadius: 10, border: `2px solid ${C.line}`, background: C.panelHi, color: C.ink, fontFamily: "'Rubik', sans-serif", outline: "none", minWidth: 0 }} />
+              <Btn small color={C.gold} disabled={!consoleName.trim() || s.money < hwCost || (s.rep ?? 50) < 60}
+                onClick={() => { startConsole(consoleName); setConsoleName(""); }}>
+                🕹 Build · {money$(hwCost)}
+              </Btn>
+            </div>
+            {(s.rep ?? 50) < 60 && <div style={{ fontSize: 12, color: C.red, marginTop: 6 }}>Retailers won't stock an unknown's hardware — reputation 60+ required (yours: {Math.round(s.rep ?? 50)}).</div>}
+          </div>
+        )}
+      </Panel>
       {/* ---- YOUR ENGINES ---- */}
       <Panel title="ENGINE WORKSHOP" accent={C.mag}>
         {(s.engines || []).length === 0 && (
@@ -4954,7 +5575,7 @@ function StatsTab({ s }) {
   );
 }
 
-function ShelfTab({ s, rerelease, portGame, liveUpdate, sunsetLive, shipExpansion }) {
+function ShelfTab({ s, rerelease, portGame, liveUpdate, sunsetLive, shipExpansion, patchGame, startDlc }) {
   const yr = yearOf(s.week);
   const rrCost = Math.round(2000 * (1 + (yr - 1984) * 0.05));
   const luCost = Math.round(3000 * (1 + Math.max(0, yr - 2010) * 0.05));
@@ -5098,6 +5719,22 @@ function ShelfTab({ s, rerelease, portGame, liveUpdate, sunsetLive, shipExpansio
                 {g.mmo && <Tag>🌍 {g.sunset ? "MMO · Sunset" : `MMO · ${(g.subs || 0).toLocaleString()} subs · ${Math.round(g.health ?? 0)}% health`}</Tag>}
               </div>
               <Row k="Lifetime revenue" v={money$(g.salesTotal)} color={C.green} />
+              {g.chartPeak != null && <Row k="Chart peak" v={`#${g.chartPeak}`} color={g.chartPeak === 1 ? C.gold : C.cyan} />}
+              {g.spend != null && (() => {
+                const net = Math.round(g.salesTotal + (g.funding || 0) - g.spend);
+                const target = g.spend - (g.funding || 0);
+                let be = null, cum = 0;
+                for (const h of g.salesHistory || []) { cum += h.rev; if (cum >= target) { be = h.w; break; } }
+                const stillEarning = g.live ? !g.sunset : g.weeksLeft > 0;
+                return (
+                  <>
+                    <Row k="Production & marketing spend" v={money$(g.spend)} color={C.red} />
+                    {(g.funding || 0) > 0 && <Row k="Funding received" v={money$(g.funding)} color={C.cyan} />}
+                    <Row k={net >= 0 ? "Net profit" : "Net loss"} v={money$(net)} color={net >= 0 ? C.green : C.red} />
+                    <Row k="Break-even" v={target <= 0 ? "Funded on day one" : be ? `Week ${be}` : stillEarning ? "Not yet" : "Never"} color={target <= 0 || be ? C.green : stillEarning ? C.gold : C.red} />
+                  </>
+                );
+              })()}
               {!g.mmo && (g.unitsTotal || 0) > 0 && (
                 <Row k={g.biz && g.biz !== "premium" ? "Downloads" : "Copies sold"} v={(g.unitsTotal || 0).toLocaleString()} color={C.cyan} />
               )}
@@ -5106,7 +5743,7 @@ function ShelfTab({ s, rerelease, portGame, liveUpdate, sunsetLive, shipExpansio
               )}
               {!g.port && !g.live && !g.exclusive && (() => {
                 const yr2 = yearOf(s.week);
-                const targets = PLATFORMS.filter(pp => pp.yr <= yr2 && platEnd(s, pp) >= yr2 && pp.id !== g.platform && !(g.portedTo || []).includes(pp.id));
+                const targets = [...PLATFORMS, ...(s.consoles || [])].filter(pp => pp.yr <= yr2 && platEnd(s, pp) >= yr2 && pp.id !== g.platform && !(g.portedTo || []).includes(pp.id));
                 if (!targets.length) return null;
                 const size = SIZES.find(z => z.id === g.size) || SIZES[0];
                 return (
@@ -5126,6 +5763,32 @@ function ShelfTab({ s, rerelease, portGame, liveUpdate, sunsetLive, shipExpansio
                 );
               })()}
               {g.exclusive && <div style={{ fontSize: 12, color: C.cyan, margin: "6px 0" }}>🤝 {typeof g.exclusive === "string" ? g.exclusive : "Platform"} exclusive — can never be ported.</div>}
+              {(() => {
+                // Post-launch support: patch a buggy launch, or greenlight DLC
+                const patchCost = Math.round(1500 * (1 + (yr - 1984) * 0.05));
+                const canPatch = !g.patched && (g.bugsAtLaunch || 0) > 5 && g.weeksLeft > 0;
+                const dlcCost = Math.round(sizeCost(SIZES.find(z => z.id === g.size) || SIZES[0], yr) * 0.3);
+                const canDlc = s.tech.includes("dlc") && !g.live && !g.port && !g.dlcUntil && (g.dlcCount || 0) < 2 && g.score >= 65;
+                if (!canPatch && !canDlc && !g.dlcUntil) return null;
+                return (
+                  <div style={{ margin: "10px 0" }}>
+                    <div style={{ fontSize: 12, color: C.dim, letterSpacing: 1, marginBottom: 6 }}>🛠 POST-LAUNCH SUPPORT</div>
+                    <div style={{ display: "grid", gap: 6 }}>
+                      {canPatch && (
+                        <Btn small kind="ghost" color={C.cyan} disabled={s.money < patchCost} onClick={() => patchGame(g.id)} style={{ width: "100%" }}>
+                          🩹 Ship a patch · {money$(patchCost)} <span style={{ color: C.dim, fontWeight: 400 }}>({g.bugsAtLaunch} launch bugs hurt word of mouth — recover +15% sales)</span>
+                        </Btn>
+                      )}
+                      {g.dlcUntil && <div style={{ fontSize: 13, color: C.mag, fontWeight: 700 }}>📦 DLC in production — launches in {Math.max(0, g.dlcUntil - s.week)}w</div>}
+                      {canDlc && (
+                        <Btn small kind="ghost" color={C.mag} disabled={s.money < dlcCost} onClick={() => startDlc(g.id)} style={{ width: "100%" }}>
+                          📦 Greenlight DLC · {money$(dlcCost)} <span style={{ color: C.dim, fontWeight: 400 }}>(~6-9w · revives or extends the sales tail · {2 - (g.dlcCount || 0)} left)</span>
+                        </Btn>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
               {!g.live && g.weeksLeft > 0 && <Row k="Still selling" v={`${g.weeksLeft}w left`} color={C.cyan} />}
               {revs.map((r, i) => (
                 <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderTop: `1px solid ${C.line}` }}>
