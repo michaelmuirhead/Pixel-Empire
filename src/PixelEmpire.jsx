@@ -691,7 +691,7 @@ function launchSales(state, proj, score) {
   const audience = Math.min(0.95, Math.max(0.06, platShareNow(state, plat, state.week)) + extraShare);
   let base =
     Math.pow(score / 10, 2.6) * 90 * size.mult * audience *
-    (1 + Math.min(2.5, state.fans / 4000)) * (1 + hype / 100);
+    fanPull(state.fans) * (1 + hype / 100);
   if (proj.ip) {
     base *= (1 + Math.min(2, proj.ip.fans / 2500));    // the IP faithful buy day one
     base *= (1 - Math.min(0.4, proj.ip.fatigue / 250)); // fatigue caps the ceiling
@@ -1157,26 +1157,35 @@ function simulateRivals(s, year) {
 // a deeper cut. They approach YOU when a game is ready to ship, and only if
 // it meets their criteria: genres they publish and the score bar their own
 // playtest of the finished build has to clear. Some enter or fold with time.
-//   share: the cut YOU keep · reach/reachRel: fan floor their logo buys
+//   share: the cut YOU keep · reach: fan floor their logo buys (1984 base —
+//   it grows ~5%/yr with the industry, and your relationship stretches it)
 //   minScore: their playtest bar · genres: what they publish (null = anything)
 const PUBLISHERS = [
-  { name: "Crescent Co.",          tier: "Boutique",     from: 1984,              share: 0.50, reach: 8000,  reachRel: 60,  minScore: 0,  minRep: 0,  genres: null },
-  { name: "Starcade Media",        tier: "Mid-size",     from: 1984, until: 2003, share: 0.35, reach: 18000, reachRel: 100, minScore: 50, minRep: 30, genres: ["action", "platformer", "shooter", "racing"] },
-  { name: "Meridian Publishing",   tier: "Mid-size",     from: 1984,              share: 0.35, reach: 18000, reachRel: 100, minScore: 50, minRep: 35, genres: ["rpg", "adventure", "strategy", "sim"] },
-  { name: "Vantage Bros.",         tier: "Major",        from: 1984,              share: 0.30, reach: 40000, reachRel: 180, minScore: 62, minRep: 50, genres: null },
-  { name: "Titanwave Interactive", tier: "Global giant", from: 1996,              share: 0.25, reach: 85000, reachRel: 300, minScore: 75, minRep: 65, genres: null },
-  { name: "Sprout Label",          tier: "Boutique",     from: 2005,              share: 0.55, reach: 12000, reachRel: 80,  minScore: 0,  minRep: 0,  genres: null },
-  { name: "Pocketworks",           tier: "Mid-size",     from: 2009,              share: 0.35, reach: 30000, reachRel: 140, minScore: 45, minRep: 25, genres: ["puzzle", "sim", "sports", "racing"] },
+  { name: "Crescent Co.",          tier: "Boutique",     from: 1984,              share: 0.50, reach: 5000,   minScore: 0,  minRep: 0,  genres: null },
+  { name: "Starcade Media",        tier: "Mid-size",     from: 1984, until: 2003, share: 0.35, reach: 20000,  minScore: 50, minRep: 30, genres: ["action", "platformer", "shooter", "racing"] },
+  { name: "Meridian Publishing",   tier: "Mid-size",     from: 1984,              share: 0.35, reach: 22000,  minScore: 50, minRep: 35, genres: ["rpg", "adventure", "strategy", "sim"] },
+  { name: "Vantage Bros.",         tier: "Major",        from: 1984,              share: 0.30, reach: 60000,  minScore: 62, minRep: 50, genres: null },
+  { name: "Titanwave Interactive", tier: "Global giant", from: 1996,              share: 0.25, reach: 140000, minScore: 75, minRep: 65, genres: null },
+  { name: "Sprout Label",          tier: "Boutique",     from: 2005,              share: 0.55, reach: 9000,   minScore: 0,  minRep: 0,  genres: null },
+  { name: "Pocketworks",           tier: "Mid-size",     from: 2009,              share: 0.35, reach: 35000,  minScore: 45, minRep: 25, genres: ["puzzle", "sim", "sports", "racing"] },
 ];
 const pubByName = n => PUBLISHERS.find(p => p.name === n);
 const pubActive = (p, year) => year >= p.from && year <= (p.until || 9999);
 
 // A deal is reach for a cut. The IP is always yours — a studio's new IP
-// belongs to the studio until the studio sells it.
-function pubDealTerms(pubObj, rel) {
-  const floor = pubObj.reach + Math.round(rel * pubObj.reachRel);
+// belongs to the studio until the studio sells it. Reach grows with the
+// industry (~5%/yr, like dev costs) and stretches with your relationship:
+// a cold contact ships you to 80% of their audience, a beloved partner 160%.
+function pubDealTerms(pubObj, rel, year) {
+  const era = 1 + (year - 1984) * 0.05;
+  const floor = Math.round(pubObj.reach * era * (0.8 + rel / 125));
   return { name: pubObj.name, share: pubObj.share, floor, ipRights: true };
 }
+
+// Audience pull from a fanbase (yours, or the floor a publisher's logo buys):
+// linear up to 10K fans, logarithmic beyond — so a 140K-reach giant genuinely
+// out-sells a 60K major, and a huge self-built fanbase keeps paying off too.
+const fanPull = f => 1 + Math.min(2.5, f / 4000) + (f > 10000 ? 1.6 * Math.log10(f / 10000) : 0);
 
 const INDIE_NAMES = ["Moonlight Attic", "Cardboard Rocket", "Two Brothers Basement", "Neon Possum", "Static Cling Games", "Paper Lantern", "Rust Belt Studio", "Midnight Waffle", "Glass Cannon Collective", "Tumbleweed Digital", "Fern & Pixel", "Broke Compass"];
 
@@ -2152,7 +2161,10 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
     if (p.pubDeal) weeklyBase *= p.pubDeal.share;
     const priceTier = PRICE_TIERS.find(t => t.id === (p.price || "std")) || PRICE_TIERS[1];
     const biz = p.platform === "mobile" ? BIZ_MODELS.find(b => b.id === (p.biz || "premium")) || BIZ_MODELS[0] : null;
-    const fanMult = (prev.tech.includes("fanclub") ? 1.5 : 1) * (trendy ? 1.25 : 1) * (biz ? biz.fans : priceTier.fans);
+    // A publisher's marketing machine converts their audience into YOUR fans —
+    // the real reason studios give up a revenue share
+    const pubFanBoost = p.pubDeal ? 1 + Math.min(1.2, p.pubDeal.floor / 200000) : 1;
+    const fanMult = (prev.tech.includes("fanclub") ? 1.5 : 1) * (trendy ? 1.25 : 1) * (biz ? biz.fans : priceTier.fans) * pubFanBoost;
     const fanGain = Math.round(Math.pow(score / 10, 2.4) * 6 * fanMult);
     // Reputation moves with quality
     let repDelta = score >= 85 ? 4 : score >= 70 ? 2 : score < 40 ? -4 : 0;
@@ -3743,7 +3755,7 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, se
     // reach; what they take is a cut.
     const offers = canRelease ? PUBLISHERS.filter(pb => pubActive(pb, year)).map(pb => {
       const rel = s.publishers?.[pb.name]?.rel ?? 50;
-      const terms = pubDealTerms(pb, rel);
+      const terms = pubDealTerms(pb, rel, year);
       const reason = rel < 25 ? "Won't work with you after last time."
         : (s.rep ?? 50) < pb.minRep ? `Wants a proven studio — reputation ${pb.minRep}+ (yours: ${Math.round(s.rep ?? 50)}).`
         : pb.genres && !pb.genres.includes(p.genre) ? `Doesn't publish ${genreById(p.genre).name.toLowerCase()} games.`
@@ -3872,7 +3884,7 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, se
                     }}>
                       📮 {pb.name} <span style={{ fontSize: 11, color: C.cyan }}>{pb.tier}</span> <span style={{ fontSize: 11, color: rel >= 65 ? C.gold : rel >= 40 ? C.dim : C.red }}>rel {Math.round(rel)}</span>
                       <div style={{ fontSize: 11, color: C.dim, fontWeight: 400, marginTop: 2 }}>
-                        {reason || `Puts it in front of ~${Math.round(terms.floor / 1000)}K fans · you keep ${Math.round(terms.share * 100)}% of revenue`}
+                        {reason || `Puts it in front of ~${Math.round(terms.floor / 1000)}K fans · you keep ${Math.round(terms.share * 100)}% of revenue · +${Math.round(Math.min(1.2, terms.floor / 200000) * 100)}% fan gain`}
                       </div>
                     </button>
                   );
