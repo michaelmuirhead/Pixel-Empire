@@ -149,6 +149,57 @@ const PLATFORMS = [
   { id: "xsx",       name: "Xbox Series X",     yr: 2020, end: 2100, share: 0.50, lic: 38000, tech: 7, holder: "Microsoft", blurb: "Game Pass and teraflops." },
 ];
 
+// ---------- AUDIENCE SEGMENTS ----------
+// Four demographics share the market: kids, casual, core, enthusiast. Every
+// genre draws a mix, every platform's install base skews a mix — putting the
+// right game on the right machine is a targeting decision (±25% sales).
+const SEGMENTS = [["kids", "Kids"], ["casual", "Casual"], ["core", "Core"], ["enth", "Enthusiast"]];
+const GENRE_AUD = {
+  action:     { kids: 0.20, casual: 0.20, core: 0.45, enth: 0.15 },
+  adventure:  { kids: 0.15, casual: 0.30, core: 0.35, enth: 0.20 },
+  rpg:        { kids: 0.05, casual: 0.15, core: 0.45, enth: 0.35 },
+  strategy:   { kids: 0.05, casual: 0.15, core: 0.40, enth: 0.40 },
+  sim:        { kids: 0.10, casual: 0.40, core: 0.25, enth: 0.25 },
+  puzzle:     { kids: 0.25, casual: 0.50, core: 0.15, enth: 0.10 },
+  sports:     { kids: 0.20, casual: 0.40, core: 0.35, enth: 0.05 },
+  racing:     { kids: 0.25, casual: 0.35, core: 0.30, enth: 0.10 },
+  shooter:    { kids: 0.05, casual: 0.20, core: 0.55, enth: 0.20 },
+  platformer: { kids: 0.40, casual: 0.30, core: 0.25, enth: 0.05 },
+};
+const PLAT_AUD = {
+  pc:        { kids: 0.05, casual: 0.20, core: 0.40, enth: 0.35 },
+  nes:       { kids: 0.45, casual: 0.30, core: 0.20, enth: 0.05 },
+  sms:       { kids: 0.35, casual: 0.30, core: 0.28, enth: 0.07 },
+  gb:        { kids: 0.45, casual: 0.35, core: 0.15, enth: 0.05 },
+  genesis:   { kids: 0.25, casual: 0.25, core: 0.40, enth: 0.10 },
+  snes:      { kids: 0.35, casual: 0.25, core: 0.30, enth: 0.10 },
+  ps1:       { kids: 0.15, casual: 0.30, core: 0.40, enth: 0.15 },
+  n64:       { kids: 0.40, casual: 0.25, core: 0.28, enth: 0.07 },
+  dreamcast: { kids: 0.10, casual: 0.20, core: 0.45, enth: 0.25 },
+  ps2:       { kids: 0.15, casual: 0.35, core: 0.38, enth: 0.12 },
+  gba:       { kids: 0.45, casual: 0.30, core: 0.20, enth: 0.05 },
+  xbox:      { kids: 0.05, casual: 0.20, core: 0.55, enth: 0.20 },
+  gamecube:  { kids: 0.45, casual: 0.25, core: 0.25, enth: 0.05 },
+  ds:        { kids: 0.35, casual: 0.45, core: 0.15, enth: 0.05 },
+  x360:      { kids: 0.05, casual: 0.25, core: 0.55, enth: 0.15 },
+  ps3:       { kids: 0.08, casual: 0.25, core: 0.50, enth: 0.17 },
+  wii:       { kids: 0.35, casual: 0.50, core: 0.10, enth: 0.05 },
+  mobile:    { kids: 0.15, casual: 0.60, core: 0.20, enth: 0.05 },
+  ps4:       { kids: 0.08, casual: 0.27, core: 0.50, enth: 0.15 },
+  xbone:     { kids: 0.08, casual: 0.27, core: 0.50, enth: 0.15 },
+  switch:    { kids: 0.30, casual: 0.35, core: 0.28, enth: 0.07 },
+  ps5:       { kids: 0.07, casual: 0.25, core: 0.50, enth: 0.18 },
+  xsx:       { kids: 0.07, casual: 0.25, core: 0.50, enth: 0.18 },
+};
+// Dot product of the mixes, scaled so an even match ≈ 1.0, clamped to ±25%.
+// Unknown platforms (your own console) sell to everyone evenly.
+function audienceFit(genreId, platId) {
+  const g = GENRE_AUD[genreId], p = PLAT_AUD[platId];
+  if (!g || !p) return 1;
+  const dot = SEGMENTS.reduce((a, [k]) => a + (g[k] || 0) * (p[k] || 0), 0);
+  return Math.max(0.75, Math.min(1.25, dot * 3.3));
+}
+
 // Old fictional-platform saves map onto the real timeline
 const PLAT_MIGRATE = { vec8: "nes", pocket: "gb", mega: "genesis", nep32: "ps1", cubex: "ps2", wavii: "wii", nephd: "ps3", nep4k: "ps4", nomad: "switch", nep5: "ps5" };
 const HOLDER_MIGRATE = { "Neptune": "Sony", "Cube Systems": "Nintendo", "Vectron Corp": "Nintendo", "MegaVision": "Sega" };
@@ -341,6 +392,24 @@ const TRAITS = {
 // Adding devs to one project has diminishing returns — the 2nd pair of hands
 // is worth less than the 1st, coordination eats the 8th. Two lean teams
 // out-produce one bloated one.
+// Each production stage leans on different chairs in the office: designers
+// carry pre-production, coders carry alpha, artists and audio carry beta's
+// content push, and polish is a code-heavy bug hunt. A team whose skills
+// match the current stage works up to 30% faster; a mismatched one drags.
+const STAGE_SKILLS = {
+  pre:    { design: 0.6, code: 0.1, art: 0.2, sound: 0.1, lean: "designers" },
+  alpha:  { code: 0.6, design: 0.2, art: 0.1, sound: 0.1, lean: "coders" },
+  beta:   { art: 0.4, sound: 0.2, code: 0.2, design: 0.2, lean: "artists & audio" },
+  polish: { code: 0.5, design: 0.1, art: 0.2, sound: 0.2, lean: "coders" },
+};
+function stageTeamFit(staff, team, stage) {
+  const w = STAGE_SKILLS[stage] || STAGE_SKILLS.alpha;
+  const crew = staff.filter(m => (m.team || "A") === team && !m.resting);
+  if (!crew.length) return 1;
+  const v = crew.reduce((a, m) => a + m.code * w.code + m.design * w.design + m.art * w.art + m.sound * w.sound, 0) / crew.length;
+  return Math.max(0.75, Math.min(1.3, v / 5));
+}
+
 function effTeamOutput(staff, team, dtMult) {
   const outs = staff
     .filter(m => (m.team || "A") === team)
@@ -447,13 +516,13 @@ const weekOf = wk => (wk % 52) + 1;
 // the actual cash delta so the statement always reconciles.
 const REV_LABELS = {
   sales: "Game sales", funding: "Advances & funding", contracts: "Contract work",
-  engine: "Engine licensing", label: "Publishing label", subs: "Subsidiaries",
-  ip: "IP sales", merch: "Merch", loan: "Loans & bailouts",
+  engine: "Engine licensing", console: "Console royalties", label: "Publishing label",
+  subs: "Subsidiaries", ip: "IP sales", merch: "Merch", loan: "Loans & bailouts",
 };
 const EXP_LABELS = {
   payroll: "Salaries & rent", dev: "Development & engines", marketing: "Marketing & events",
   liveops: "Live ops & servers", hiring: "Recruiting", label: "Publishing label",
-  biz: "Deals & acquisitions", loan: "Loan payments",
+  biz: "Deals & acquisitions", hardware: "Hardware division", loan: "Loan payments",
 };
 const ysAdd = (ys, kind, key, amt) => !ys || !amt ? ys
   : { ...ys, [kind]: { ...(ys[kind] || {}), [key]: ((ys[kind] || {})[key] || 0) + amt } };
@@ -564,6 +633,9 @@ function freshState(studioName, founder) {
     yearStats: { revenue: 0, lastRevenue: 0, fansStart: 0, repStart: 50, topRival: null, cashStart: 20000, rev: {}, exp: {} },
     yearReview: null,
     ledger: [],
+    consoles: [],        // hardware you've shipped
+    consoleProject: null, // hardware in the lab: { name, done, cost }
+    consoleRoyalties: 0,
     released: [],
     ips: {},        // IP you own
     market: [],     // IP currently for sale
@@ -599,7 +671,14 @@ function freshState(studioName, founder) {
 
 function topicById(id) { return TOPICS.find(t => t.id === id); }
 function genreById(id) { return GENRES.find(g => g.id === id); }
-function platById(id)  { return PLATFORMS.find(p => p.id === id); }
+// Player-built consoles live in save state but need to resolve through
+// platById like any other platform — a small registry keeps them reachable.
+let CUSTOM_PLATS = {};
+function syncCustomPlats(s) {
+  CUSTOM_PLATS = {};
+  for (const c of s?.consoles || []) CUSTOM_PLATS[c.id] = c;
+}
+function platById(id)  { return PLATFORMS.find(p => p.id === id) || CUSTOM_PLATS[id]; }
 
 function matchBonus(genreId, topicId) {
   const t = topicById(topicId);
@@ -691,7 +770,8 @@ function launchSales(state, proj, score) {
   const audience = Math.min(0.95, Math.max(0.06, platShareNow(state, plat, state.week)) + extraShare);
   let base =
     Math.pow(score / 10, 2.6) * 90 * size.mult * audience *
-    fanPull(state.fans) * (1 + hype / 100);
+    fanPull(state.fans) * (1 + hype / 100) *
+    audienceFit(proj.genre, proj.platform); // right game, right demographic
   if (proj.ip) {
     base *= (1 + Math.min(2, proj.ip.fans / 2500));    // the IP faithful buy day one
     base *= (1 - Math.min(0.4, proj.ip.fatigue / 250)); // fatigue caps the ceiling
@@ -815,6 +895,10 @@ async function loadGame() {
       if (s[k]?.stage === "dev") s[k] = { ...s[k], stage: s[k].progress >= s[k].totalWeeks * 0.6 ? "beta" : "alpha" };
     }
     if (s.publishers) for (const p of PUBLISHERS) if (!s.publishers[p.name]) s.publishers[p.name] = { rel: 50 };
+    if (!s.consoles) s.consoles = [];
+    if (s.consoleProject === undefined) s.consoleProject = null;
+    if (s.consoleRoyalties === undefined) s.consoleRoyalties = 0;
+    syncCustomPlats(s);
     if (!s.yearStats) s.yearStats = { revenue: 0, lastRevenue: 0, fansStart: s.fans, repStart: s.rep ?? 50, topRival: null };
     if (s.yearReview === undefined) s.yearReview = null;
     if (s.yearStats.cashStart === undefined) s.yearStats = { ...s.yearStats, cashStart: s.money, rev: {}, exp: {} };
@@ -1054,6 +1138,15 @@ function simulateRivals(s, year) {
       const rTrendy = s.trend && (s.trend.type === "genre" ? s.trend.id === genreId : Math.random() < 0.3);
       r.prestige = Math.max(0, Math.round(r.prestige + (score - 55) * 8 * (rTrendy ? 2 : 1)));
       if (rTrendy && score >= 70) s.log = pushLog(s, `📈 ${r.name} rode the ${trendLabel(s.trend)} wave with "${title}" (${score}/100) — their stock is soaring.`);
+      // Third parties on YOUR hardware pay license royalties per release
+      for (const oc of s.consoles || []) {
+        if (year >= oc.yr && year <= platEnd(s, oc) && Math.random() < Math.min(0.55, platShareNow(s, oc, s.week) * 1.8)) {
+          const roy = Math.round(score * 15 * (1 + (year - 1984) * 0.03));
+          s.money += roy;
+          s.yearStats = ysAdd(s.yearStats, "rev", "console", roy);
+          s.consoleRoyalties = (s.consoleRoyalties || 0) + roy;
+        }
+      }
       r.nextRelease = s.week + ri(r.cadence[0], r.cadence[1]);
       s.rivalReleases = [...(s.rivalReleases || []), { name: title, score, year, genre: genreId, rivalId: id, rivalName: r.name }].slice(-80);
     }
@@ -1419,6 +1512,22 @@ async function wipeSave() {
 function tick(prev) {
   let s = { ...prev, week: prev.week + 1 };
   const year = yearOf(s.week);
+  syncCustomPlats(s);
+
+  // Hardware lab: your console launches when the work is done
+  if (s.consoleProject && s.week >= s.consoleProject.done) {
+    const hwTech = Math.max(...PLATFORMS.filter(p => p.yr <= year).map(p => p.tech));
+    const c = {
+      id: "own-" + Math.random().toString(36).slice(2),
+      name: s.consoleProject.name, yr: year, end: year + 9,
+      share: 0.16, lic: 0, tech: hwTech, holder: null, own: true,
+      blurb: "Your own machine. No license fees — and every third-party game pays you.",
+    };
+    s.consoles = [...(s.consoles || []), c];
+    s.consoleProject = null;
+    syncCustomPlats(s);
+    s.log = pushLog(s, `🕹 The ${c.name} hits shelves! Your hardware, your rules — ship first-party hits to grow the install base. A hardware generation lasts ~9 years.`);
+  }
 
   // Costs
   const salaries = s.staff.reduce((a, m) => a + m.salary, 0);
@@ -1496,9 +1605,10 @@ function tick(prev) {
     const bugRate = (s.tech.includes("qa") ? 0.6 : 1)
       * (s.staff.some(m => m.trait === "bugmagnet" && crew(m)) ? 1.1 : 1)
       * (np.crunch ? 1.25 : 1);
+    const stageFit = stageTeamFit(s.staff, np.team || "A", np.stage);
     if (np.stage === "pre") {
       // Pre-production: no bugs, and the team's design chops set the vision
-      np.progress += Math.min(gainCap, teamOutput * projectShare * speed * rnd(0.85, 1.15));
+      np.progress += Math.min(gainCap, teamOutput * projectShare * speed * stageFit * rnd(0.85, 1.15));
       s.rp += rnd(0.3, 0.8);
       if (np.progress >= np.totalWeeks * 0.15) {
         const crewMembers = s.staff.filter(crew);
@@ -1509,7 +1619,7 @@ function tick(prev) {
       }
     } else if (np.stage === "alpha") {
       // Alpha: features go in fast, and so do the bugs
-      np.progress += Math.min(gainCap, teamOutput * projectShare * speed * rnd(0.85, 1.15));
+      np.progress += Math.min(gainCap, teamOutput * projectShare * speed * stageFit * rnd(0.85, 1.15));
       np.bugs += rnd(0.5, 1.5) * 1.2 * bugRate * sizeBugMult;
       s.rp += rnd(0.6, 1.4);
       if (np.progress >= np.totalWeeks * 0.6) {
@@ -1519,7 +1629,7 @@ function tick(prev) {
       }
     } else if (np.stage === "beta") {
       // Beta: features frozen — fewer new bugs, and previews build hype weekly
-      np.progress += Math.min(gainCap, teamOutput * projectShare * speed * rnd(0.85, 1.15));
+      np.progress += Math.min(gainCap, teamOutput * projectShare * speed * stageFit * rnd(0.85, 1.15));
       np.bugs += rnd(0.3, 0.9) * 0.7 * bugRate * sizeBugMult;
       np.hype = Math.min(100, (np.hype || 0) + 0.5);
       s.rp += rnd(0.6, 1.4);
@@ -1528,7 +1638,7 @@ function tick(prev) {
         s.log = pushLog(s, `"${np.name}" hit content-complete — post-production begins. Squash bugs and build hype.`);
       }
     } else if (np.stage === "polish") {
-      np.bugs = Math.max(0, np.bugs - teamOutput * projectShare * 0.9 * (s.tech.includes("autotest") ? 1.5 : 1) * (np.crunch ? 1.3 : 1));
+      np.bugs = Math.max(0, np.bugs - teamOutput * projectShare * 0.9 * stageFit * (s.tech.includes("autotest") ? 1.5 : 1) * (np.crunch ? 1.3 : 1));
       if (!s.tech.includes("pr")) np.hype = Math.max(0, (np.hype || 0) - 1);
       s.rp += rnd(0.3, 0.8);
     }
@@ -2097,6 +2207,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
           ...draft, team: draft.team || "A", points: size.points, extraPlatforms: extras,
           progress: 0, totalWeeks: totalWork, maxWeekly: totalWork / size.minWeeks,
           bugs: 0, hype: Math.min(100, startHype), vision: 0, crunch: false, stage: "pre",
+          spend: cost, funding: exclFund, // the project's own books
         };
       })(),
       log: pushLog(prev, draft.remakeOf
@@ -2115,7 +2226,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
       ...prev,
       money: prev.money - 1500,
       yearStats: ysAdd(prev.yearStats, "exp", "marketing", 1500),
-      [slot]: { ...prev[slot], hype: Math.min(100, (prev[slot].hype || 0) + boost) },
+      [slot]: { ...prev[slot], hype: Math.min(100, (prev[slot].hype || 0) + boost), spend: (prev[slot].spend || 0) + 1500 },
       log: pushLog(prev, `Marketing push! Hype +${boost}.`),
     };
   });
@@ -2194,6 +2305,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
       unitPrice, unitsTotal: 0, salesHistory: [],
       extraPlatforms: p.extraPlatforms?.length ? [...p.extraPlatforms] : undefined,
       portedTo: p.extraPlatforms?.length ? [...p.extraPlatforms] : undefined, // day-one platforms can't be ported to again
+      spend: p.spend || 0, funding: p.funding || 0,
       year: yearOf(prev.week),
       hue: ri(0, 360),
     };
@@ -2301,6 +2413,11 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
       holders = { ...holders, [platObj.holder]: { rel: Math.max(0, Math.min(100, hRel0 + hD)) } };
     }
     const launchBonus = holderLog ? 8000 : 0;
+    rec.funding = (rec.funding || 0) + launchBonus;
+    // Releasing on your own hardware sells hardware
+    const consoles = platObj?.own
+      ? (prev.consoles || []).map(c => c.id === platObj.id ? { ...c, share: Math.min(0.45, c.share + (score >= 70 ? 0.03 : 0.015)) } : c)
+      : (prev.consoles || []);
 
     // Settle with the publisher: relationships remember everything
     let pubLog = null, clawback = 0, publishers = prev.publishers;
@@ -2335,6 +2452,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
       money: prev.money - clawback + launchBonus,
       yearStats: ysAdd(ysAdd(prev.yearStats, "exp", "biz", clawback), "rev", "funding", launchBonus),
       holders,
+      consoles,
       [slot]: null,
       released: [rec, ...prev.released],
       fans: prev.fans + fanGain,
@@ -2507,7 +2625,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
       ...prev,
       money: prev.money - cost,
       yearStats: ysAdd(prev.yearStats, "exp", "liveops", cost),
-      released: prev.released.map(x => x.id === gameId ? { ...x, health: Math.min(100, (x.health ?? 0) + 30) } : x),
+      released: prev.released.map(x => x.id === gameId ? { ...x, health: Math.min(100, (x.health ?? 0) + 30), spend: (x.spend || 0) + cost } : x),
       log: pushLog(prev, `🌐 Content update shipped for "${g.name}" — the player base is buzzing again.`),
     };
   });
@@ -2533,7 +2651,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
       money: prev.money - cost,
       yearStats: ysAdd(prev.yearStats, "exp", "liveops", cost),
       released: prev.released.map(x => x.id === gameId
-        ? { ...x, health: Math.min(100, (x.health ?? 0) + 45), subs: Math.min(x.subCap || Infinity, Math.round((x.subs || 0) * 1.35)), bleeding: false }
+        ? { ...x, health: Math.min(100, (x.health ?? 0) + 45), subs: Math.min(x.subCap || Infinity, Math.round((x.subs || 0) * 1.35)), bleeding: false, spend: (x.spend || 0) + cost }
         : x),
       fans: prev.fans + ri(50, 150),
       log: pushLog(prev, `📦 "${g.name}" expansion launched — lapsed subscribers are reinstalling.`),
@@ -2561,7 +2679,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
       name: `${g.name} (${target.name})`,
       platform: platId, port: true, portedTo: undefined, rereleased: true, goty: false,
       weeklyBase: portWeekly, weeksLeft: weeks, weeksTotal: weeks, salesTotal: 0,
-      unitsTotal: 0, salesHistory: [],
+      unitsTotal: 0, salesHistory: [], spend: cost, funding: 0,
       year: year2, live: false, health: undefined, sunset: undefined,
     };
     // Holder likes seeing your catalog arrive
@@ -2591,7 +2709,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
       yearStats: ysAdd(prev.yearStats, "exp", "dev", cost),
       fans: prev.fans + 100,
       released: prev.released.map(x => x.id === gameId
-        ? { ...x, rereleased: true, weeksLeft: 8, weeksTotal: 8, weeklyBase: x.weeklyBase * 0.35 }
+        ? { ...x, rereleased: true, weeksLeft: 8, weeksTotal: 8, weeklyBase: x.weeklyBase * 0.35, spend: (x.spend || 0) + cost }
         : x),
       log: pushLog(prev, `💿 "${g.name}" is back on shelves as a Greatest Hits budget re-release.`),
     };
@@ -2602,6 +2720,21 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
     if (t.req && !prev.engineTechs.includes(t.req)) return prev;
     if (t.yr && yearOf(prev.week) < t.yr) return prev;
     return { ...prev, rp: prev.rp - t.cost, engineTechs: [...prev.engineTechs, t.id], log: pushLog(prev, `🔬 Engine tech researched: ${t.name}. Build it into an engine to use it.`) };
+  });
+
+  const startConsole = name => update(prev => {
+    const clean = (name || "").trim();
+    const year = yearOf(prev.week);
+    const cost = Math.round(200000 * (1 + (year - 1984) * 0.05));
+    if (!clean || prev.consoleProject || prev.money < cost || (prev.rep ?? 50) < 60) return prev;
+    if ((prev.consoles || []).some(c => year <= platEnd(prev, c))) return prev; // one live console at a time
+    return {
+      ...prev,
+      money: prev.money - cost,
+      yearStats: ysAdd(prev.yearStats, "exp", "hardware", cost),
+      consoleProject: { name: clean, done: prev.week + 30, cost },
+      log: pushLog(prev, `🕹 Hardware division spun up — the "${clean}" enters development for ${money$(cost)}. Launch in ~30 weeks.`),
+    };
   });
 
   const buildEngine = name => update(prev => {
@@ -3119,7 +3252,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
   const office = OFFICES[s.office];
   const nextOffice = OFFICES[s.office + 1];
   const weeklyCost = s.staff.reduce((a, m) => a + m.salary, 0) + office.rent;
-  const activePlatforms = PLATFORMS.filter(p => p.yr <= year && platEnd(s, p) >= year);
+  const activePlatforms = [...PLATFORMS, ...(s.consoles || [])].filter(p => p.yr <= year && platEnd(s, p) >= year);
   const activeTopics = TOPICS.filter(t => t.yr <= year);
 
   const tabs = [
@@ -3207,7 +3340,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
       {s.tab === "studio"   && <StudioTab s={s} nextOffice={nextOffice} upgradeOffice={upgradeOffice} acceptContract={acceptContract} abandonContract={abandonContract} fundPitch={fundPitch} />}
       {s.tab === "dev"      && <DevTab s={s} startProject={startProject} releaseGame={releaseGame} marketPush={marketPush} setPrice={setPrice} setBiz={setBiz} setLive={setLive} setMmo={setMmo} toggleCrunch={toggleCrunch} activePlatforms={activePlatforms} activeTopics={activeTopics} year={year} />}
       {s.tab === "team"     && <TeamTab s={s} hire={hire} fire={fire} office={office} recruitAd={recruitAd} recruitHeadhunter={recruitHeadhunter} poachRival={poachRival} toggleRest={toggleRest} setLead={setLead} assignTeam={assignTeam} />}
-      {s.tab === "research" && <ResearchTab s={s} buyTech={buyTech} buyEngineTech={buyEngineTech} buildEngine={buildEngine} updateEngine={updateEngine} toggleEngineLicense={toggleEngineLicense} licenseRivalEngine={licenseRivalEngine} />}
+      {s.tab === "research" && <ResearchTab s={s} buyTech={buyTech} buyEngineTech={buyEngineTech} buildEngine={buildEngine} updateEngine={updateEngine} toggleEngineLicense={toggleEngineLicense} licenseRivalEngine={licenseRivalEngine} startConsole={startConsole} />}
       {s.tab === "ip"       && <IpTab s={s} sellIp={sellIp} buyIp={buyIp} renameIp={renameIp} buybackPubIp={buybackPubIp} openTalks={openTalks} orderSequel={orderSequel} injectCapital={injectCapital} absorbSubsidiary={absorbSubsidiary} sellSubsidiary={sellSubsidiary} />}
       {s.tab === "shelf"    && <ShelfTab s={s} rerelease={rerelease} portGame={portGame} liveUpdate={liveUpdate} sunsetLive={sunsetLive} shipExpansion={shipExpansion} />}
       {s.tab === "stats"    && <StatsTab s={s} />}
@@ -3774,6 +3907,15 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, se
             const eng = resolveEngine(s, p.engine);
             return <div style={{ fontSize: 13, color: C.dim, marginTop: 4 }}>🔧 {eng ? `${eng.name} · power ${eng.power}` : "No engine — raw code"}</div>;
           })()}
+          {(() => {
+            const fit = stageTeamFit(s.staff, p.team || "A", p.stage);
+            const stageName = { pre: "Pre-production", alpha: "Alpha", beta: "Beta", polish: "Polish" }[p.stage] || p.stage;
+            return (
+              <div style={{ fontSize: 13, color: fit >= 1.05 ? C.green : fit >= 0.9 ? C.dim : C.red, marginTop: 4 }}>
+                🎯 {stageName} leans on {(STAGE_SKILLS[p.stage] || STAGE_SKILLS.alpha).lean} — team fit ×{fit.toFixed(2)}
+              </div>
+            );
+          })()}
           {p.stage === "polish" && (
             <div style={{ marginTop: 14, fontSize: 15, color: C.dim, lineHeight: 1.5 }}>
               Each week of polish squashes bugs, but hype slowly fades. Release when bugs are low and hype is high.
@@ -4084,6 +4226,11 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, se
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
           {GENRES.map(gg => chip(draft.genre === gg.id, () => setDraft(v => ({ ...v, genre: gg.id })), gg.name))}
         </div>
+        {GENRE_AUD[draft.genre] && (
+          <div style={{ fontSize: 12, color: C.dim, marginTop: 6 }}>
+            👥 Who buys {genreById(draft.genre).name.toLowerCase()}: {SEGMENTS.map(([k, label]) => `${label} ${Math.round(GENRE_AUD[draft.genre][k] * 100)}%`).join(" · ")}
+          </div>
+        )}
         <div style={{ fontSize: 13, color: C.dim, margin: "14px 0 6px", letterSpacing: 1 }}>TOPIC</div>
         <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
           <div style={{
@@ -4149,9 +4296,11 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, se
             const fate = platFate(s, pp);
             const phase = platPhase(s, pp, s.week);
             const verdict = fate.revealed && fate.verdict === "hit" ? " · 🚀 winning the war" : fate.revealed && fate.verdict === "flop" ? " · 💀 flopping" : "";
+            const fit = audienceFit(draft.genre, pp.id);
+            const fitTag = fit >= 1.1 ? "👥 great audience fit" : fit >= 0.95 ? "👥 fine audience fit" : "👥 poor audience fit";
             return chip(draft.platform === pp.id, () => setDraft(v => ({ ...v, platform: pp.id, exclusive: false, extraPlatforms: (v.extraPlatforms || []).filter(x => x !== pp.id) })),
               `${pp.name} · lic ${money$(effLicense(s, pp, s.week))}`,
-              `${Math.round(platShareNow(s, pp, s.week) * 100)}% market · ${phase}${verdict} — ${pp.blurb}`);
+              `${Math.round(platShareNow(s, pp, s.week) * 100)}% market · ${phase}${verdict} · ${fitTag} — ${pp.blurb}`);
           })}
         </div>
         {s.tech.includes("multiplat") && (
@@ -4381,15 +4530,60 @@ function TeamTab({ s, hire, fire, office, recruitAd, recruitHeadhunter, poachRiv
   );
 }
 
-function ResearchTab({ s, buyTech, buyEngineTech, buildEngine, updateEngine, toggleEngineLicense, licenseRivalEngine }) {
+function ResearchTab({ s, buyTech, buyEngineTech, buildEngine, updateEngine, toggleEngineLicense, licenseRivalEngine, startConsole }) {
   const year = yearOf(s.week);
   const [engineName, setEngineName] = useState("");
+  const [consoleName, setConsoleName] = useState("");
   const researchedPower = enginePowerFromParts(s.engineTechs || []);
   const buildCost = 3000 + researchedPower * 150;
   const era = eraPower(year);
+  const hwCost = Math.round(200000 * (1 + (year - 1984) * 0.05));
+  const liveConsole = (s.consoles || []).find(c => year <= platEnd(s, c));
+  const pastConsoles = (s.consoles || []).filter(c => year > platEnd(s, c));
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
+      {/* ---- HARDWARE DIVISION ---- */}
+      <Panel title="HARDWARE DIVISION" accent={C.gold}>
+        {liveConsole ? (() => {
+          const share = Math.round(platShareNow(s, liveConsole, s.week) * 100);
+          const firstParty = s.released.filter(g => g.platform === liveConsole.id || (g.extraPlatforms || []).includes(liveConsole.id)).length;
+          return (
+            <div>
+              <div style={{ fontFamily: "'Bungee', cursive", fontSize: 20, color: C.gold, marginBottom: 6 }}>🕹 {liveConsole.name}</div>
+              <Row k="Market share" v={`${share}%`} color={C.cyan} />
+              <Row k="Phase" v={platPhase(s, liveConsole, s.week)} />
+              <Row k="Generation ends" v={`~${platEnd(s, liveConsole)}`} color={C.dim} />
+              <Row k="First-party releases" v={firstParty} color={C.mag} />
+              <Row k="Third-party royalties" v={money$(s.consoleRoyalties || 0)} color={C.green} />
+              <div style={{ fontSize: 13, color: C.dim, marginTop: 8 }}>
+                Every first-party release grows the install base (hits grow it faster), and rival studios shipping on your machine pay royalties. No license fees on your own hardware.
+              </div>
+            </div>
+          );
+        })() : s.consoleProject ? (
+          <div>
+            <div style={{ fontFamily: "'Bungee', cursive", fontSize: 18, color: C.gold, marginBottom: 6 }}>🕹 {s.consoleProject.name} — in development</div>
+            <Meter label={`Launch in ${Math.max(0, s.consoleProject.done - s.week)} weeks`} pct={Math.min(100, 100 - ((s.consoleProject.done - s.week) / 30) * 100)} color={C.gold} />
+          </div>
+        ) : (
+          <div>
+            <div style={{ fontSize: 14, color: C.dim, marginBottom: 12 }}>
+              The endgame move: build your own console. {money$(hwCost)} and ~30 weeks buys a machine at the current tech tier with a ~9-year generation. First-party hits grow its market share, and every third-party release pays you royalties. Requires reputation 60+{pastConsoles.length ? ` — the ${pastConsoles[pastConsoles.length - 1].name} generation has ended; time for a successor` : ""}.
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input value={consoleName} placeholder="Console name"
+                onChange={e => setConsoleName(e.target.value)}
+                style={{ flex: 1, fontSize: 16, padding: "10px 12px", borderRadius: 10, border: `2px solid ${C.line}`, background: C.panelHi, color: C.ink, fontFamily: "'Rubik', sans-serif", outline: "none", minWidth: 0 }} />
+              <Btn small color={C.gold} disabled={!consoleName.trim() || s.money < hwCost || (s.rep ?? 50) < 60}
+                onClick={() => { startConsole(consoleName); setConsoleName(""); }}>
+                🕹 Build · {money$(hwCost)}
+              </Btn>
+            </div>
+            {(s.rep ?? 50) < 60 && <div style={{ fontSize: 12, color: C.red, marginTop: 6 }}>Retailers won't stock an unknown's hardware — reputation 60+ required (yours: {Math.round(s.rep ?? 50)}).</div>}
+          </div>
+        )}
+      </Panel>
       {/* ---- YOUR ENGINES ---- */}
       <Panel title="ENGINE WORKSHOP" accent={C.mag}>
         {(s.engines || []).length === 0 && (
@@ -5098,6 +5292,21 @@ function ShelfTab({ s, rerelease, portGame, liveUpdate, sunsetLive, shipExpansio
                 {g.mmo && <Tag>🌍 {g.sunset ? "MMO · Sunset" : `MMO · ${(g.subs || 0).toLocaleString()} subs · ${Math.round(g.health ?? 0)}% health`}</Tag>}
               </div>
               <Row k="Lifetime revenue" v={money$(g.salesTotal)} color={C.green} />
+              {g.spend != null && (() => {
+                const net = Math.round(g.salesTotal + (g.funding || 0) - g.spend);
+                const target = g.spend - (g.funding || 0);
+                let be = null, cum = 0;
+                for (const h of g.salesHistory || []) { cum += h.rev; if (cum >= target) { be = h.w; break; } }
+                const stillEarning = g.live ? !g.sunset : g.weeksLeft > 0;
+                return (
+                  <>
+                    <Row k="Production & marketing spend" v={money$(g.spend)} color={C.red} />
+                    {(g.funding || 0) > 0 && <Row k="Funding received" v={money$(g.funding)} color={C.cyan} />}
+                    <Row k={net >= 0 ? "Net profit" : "Net loss"} v={money$(net)} color={net >= 0 ? C.green : C.red} />
+                    <Row k="Break-even" v={target <= 0 ? "Funded on day one" : be ? `Week ${be}` : stillEarning ? "Not yet" : "Never"} color={target <= 0 || be ? C.green : stillEarning ? C.gold : C.red} />
+                  </>
+                );
+              })()}
               {!g.mmo && (g.unitsTotal || 0) > 0 && (
                 <Row k={g.biz && g.biz !== "premium" ? "Downloads" : "Copies sold"} v={(g.unitsTotal || 0).toLocaleString()} color={C.cyan} />
               )}
@@ -5106,7 +5315,7 @@ function ShelfTab({ s, rerelease, portGame, liveUpdate, sunsetLive, shipExpansio
               )}
               {!g.port && !g.live && !g.exclusive && (() => {
                 const yr2 = yearOf(s.week);
-                const targets = PLATFORMS.filter(pp => pp.yr <= yr2 && platEnd(s, pp) >= yr2 && pp.id !== g.platform && !(g.portedTo || []).includes(pp.id));
+                const targets = [...PLATFORMS, ...(s.consoles || [])].filter(pp => pp.yr <= yr2 && platEnd(s, pp) >= yr2 && pp.id !== g.platform && !(g.portedTo || []).includes(pp.id));
                 if (!targets.length) return null;
                 const size = SIZES.find(z => z.id === g.size) || SIZES[0];
                 return (
