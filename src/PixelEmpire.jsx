@@ -200,6 +200,20 @@ function audienceFit(genreId, platId) {
   return Math.max(0.75, Math.min(1.25, dot * 3.3));
 }
 
+// Marketing buys attention from a specific crowd — hype lands only as well as
+// the channel's audience overlaps the game's.
+const MKT_CHANNELS = [
+  { id: "tv",   name: "TV spots",     cost: 2500, boost: 16, aud: { kids: 0.40, casual: 0.45, core: 0.10, enth: 0.05 } },
+  { id: "mag",  name: "Games press",  cost: 1500, boost: 14, aud: { kids: 0.05, casual: 0.20, core: 0.50, enth: 0.25 } },
+  { id: "expo", name: "Demo circuit", cost: 2000, boost: 15, aud: { kids: 0.10, casual: 0.15, core: 0.45, enth: 0.30 } },
+];
+function channelFit(channel, genreId) {
+  const g = GENRE_AUD[genreId];
+  if (!g) return 1;
+  const dot = SEGMENTS.reduce((a, [k]) => a + (channel.aud[k] || 0) * (g[k] || 0), 0);
+  return Math.max(0.6, Math.min(1.4, dot * 3.3));
+}
+
 // Old fictional-platform saves map onto the real timeline
 const PLAT_MIGRATE = { vec8: "nes", pocket: "gb", mega: "genesis", nep32: "ps1", cubex: "ps2", wavii: "wii", nephd: "ps3", nep4k: "ps4", nomad: "switch", nep5: "ps5" };
 const HOLDER_MIGRATE = { "Neptune": "Sony", "Cube Systems": "Nintendo", "Vectron Corp": "Nintendo", "MegaVision": "Sega" };
@@ -1148,7 +1162,7 @@ function simulateRivals(s, year) {
         }
       }
       r.nextRelease = s.week + ri(r.cadence[0], r.cadence[1]);
-      s.rivalReleases = [...(s.rivalReleases || []), { name: title, score, year, genre: genreId, rivalId: id, rivalName: r.name }].slice(-80);
+      s.rivalReleases = [...(s.rivalReleases || []), { name: title, score, year, wk: s.week, genre: genreId, rivalId: id, rivalName: r.name }].slice(-80);
     }
 
     // Subsidiaries keep their catalog in the family and can't go under on their own
@@ -1674,8 +1688,22 @@ function tick(prev) {
     }
   }
 
+  // DLC wraps: a finished pack revives the tail (or extends a live one)
+  s.released = s.released.map(gm => {
+    if (!gm.dlcUntil || s.week < gm.dlcUntil) return gm;
+    const revived = gm.weeksLeft <= 0;
+    s.log = pushLog(s, `📦 "${gm.name}" DLC launched — ${revived ? "the game is back on the charts" : "the sales tail gets a second wind"}.`);
+    s.fans += ri(40, 120);
+    return {
+      ...gm, dlcUntil: undefined, dlcCount: (gm.dlcCount || 0) + 1,
+      weeksLeft: Math.max(gm.weeksLeft, 10), weeksTotal: Math.max(gm.weeksTotal, 10),
+      weeklyBase: revived ? gm.weeklyBase * 0.5 : gm.weeklyBase * 1.1,
+    };
+  });
+
   // Sales on released games + live-service revenue
   let weekRevenue = 0, serverBills = 0;
+  const weekChart = []; // this week's sellers, for the top-10 chart
   // Every earning week is recorded on the game so the shelf can chart it
   const withHistory = (gm, rev, units) => [
     ...(gm.salesHistory || []),
@@ -1695,6 +1723,7 @@ function tick(prev) {
       const net = rev - serverCost;
       weekRevenue += rev;
       serverBills += serverCost;
+      weekChart.push({ id: gm.id, name: gm.name, rev, mine: true });
       if (net < 0 && !gm.bleeding) s.log = pushLog(s, `🩸 "${gm.name}" is losing money — server bills now outrun subscriptions. Ship an expansion or sunset it.`);
       const grown = health >= 70
         ? Math.min(gm.subCap || Infinity, (gm.subs || 0) * 1.02)
@@ -1720,6 +1749,7 @@ function tick(prev) {
       const rev = gm.weeklyBase * 0.45 * ((gm.health ?? 100) / 100) * rnd(0.85, 1.15);
       weekRevenue += rev;
       if (Math.random() < 0.3) s.fans += ri(1, 8);
+      weekChart.push({ id: gm.id, name: gm.name, rev, mine: true });
       return { ...gm, health: Math.max(0, (gm.health ?? 100) - 1.2), salesTotal: gm.salesTotal + rev, salesHistory: withHistory(gm, rev, null) };
     }
     if (gm.weeksLeft <= 0) return gm;
@@ -1727,11 +1757,30 @@ function tick(prev) {
     const rev = gm.weeklyBase * decay * rnd(0.8, 1.2);
     weekRevenue += rev;
     const units = gm.unitPrice ? Math.round(rev / gm.unitPrice) : null;
+    weekChart.push({ id: gm.id, name: gm.name, rev, mine: true });
     return {
       ...gm, weeksLeft: gm.weeksLeft - 1, salesTotal: gm.salesTotal + rev,
       unitsTotal: (gm.unitsTotal || 0) + (units || 0),
       salesHistory: withHistory(gm, rev, units),
     };
+  });
+
+  // ---- The weekly top-10 sales chart: your catalog vs the industry ----
+  for (const rr of s.rivalReleases || []) {
+    if (rr.wk == null) continue;
+    const age = s.week - rr.wk;
+    if (age < 0 || age > 15) continue;
+    weekChart.push({ name: rr.name, rev: Math.pow(rr.score / 10, 2.6) * 500 * (1 - age / 16), rivalName: rr.rivalName });
+  }
+  s.chart = weekChart.sort((a, b) => b.rev - a.rev).slice(0, 10).map((e, i) => ({ ...e, pos: i + 1, rev: Math.round(e.rev) }));
+  s.released = s.released.map(gm => {
+    const pos = s.chart.find(e => e.id === gm.id)?.pos;
+    if (!pos) return gm;
+    if (pos === 1) {
+      s.fans += 30; // the whole industry is talking about you
+      if (gm.chartPeak !== 1) s.log = pushLog(s, `🏆 "${gm.name}" is this week's #1 best-selling game in the world.`);
+    }
+    return { ...gm, chartPeak: gm.chartPeak == null ? pos : Math.min(gm.chartPeak, pos) };
   });
   s.money += weekRevenue - serverBills;
   if (s.yearStats) s.yearStats = { ...s.yearStats, revenue: (s.yearStats.revenue || 0) + weekRevenue };
@@ -2218,16 +2267,18 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
     };
   });
 
-  const marketPush = (team = "A") => update(prev => {
+  const marketPush = (team = "A", channelId = "mag") => update(prev => {
     const slot = slotOf(team);
-    if (!prev[slot] || prev.money < 1500) return prev;
-    const boost = prev.tech.includes("mktdpt") ? 18 : 12;
+    const ch = MKT_CHANNELS.find(c => c.id === channelId) || MKT_CHANNELS[1];
+    if (!prev[slot] || prev.money < ch.cost) return prev;
+    const fit = channelFit(ch, prev[slot].genre);
+    const boost = Math.round(ch.boost * fit * (prev.tech.includes("mktdpt") ? 1.4 : 1));
     return {
       ...prev,
-      money: prev.money - 1500,
-      yearStats: ysAdd(prev.yearStats, "exp", "marketing", 1500),
-      [slot]: { ...prev[slot], hype: Math.min(100, (prev[slot].hype || 0) + boost), spend: (prev[slot].spend || 0) + 1500 },
-      log: pushLog(prev, `Marketing push! Hype +${boost}.`),
+      money: prev.money - ch.cost,
+      yearStats: ysAdd(prev.yearStats, "exp", "marketing", ch.cost),
+      [slot]: { ...prev[slot], hype: Math.min(100, (prev[slot].hype || 0) + boost), spend: (prev[slot].spend || 0) + ch.cost },
+      log: pushLog(prev, `📣 ${ch.name} campaign for "${prev[slot].name}" — ${fit >= 1.1 ? "right in front of its audience" : fit <= 0.8 ? "wrong crowd, money half-wasted" : "decent placement"}. Hype +${boost}.`),
     };
   });
 
@@ -2305,7 +2356,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
       unitPrice, unitsTotal: 0, salesHistory: [],
       extraPlatforms: p.extraPlatforms?.length ? [...p.extraPlatforms] : undefined,
       portedTo: p.extraPlatforms?.length ? [...p.extraPlatforms] : undefined, // day-one platforms can't be ported to again
-      spend: p.spend || 0, funding: p.funding || 0,
+      spend: p.spend || 0, funding: p.funding || 0, bugsAtLaunch: Math.round(p.bugs || 0),
       year: yearOf(prev.week),
       hue: ri(0, 360),
     };
@@ -2655,6 +2706,36 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
         : x),
       fans: prev.fans + ri(50, 150),
       log: pushLog(prev, `📦 "${g.name}" expansion launched — lapsed subscribers are reinstalling.`),
+    };
+  });
+
+  const patchGame = gameId => update(prev => {
+    const g = prev.released.find(x => x.id === gameId);
+    const yr = yearOf(prev.week);
+    const cost = Math.round(1500 * (1 + (yr - 1984) * 0.05));
+    if (!g || g.patched || (g.bugsAtLaunch || 0) <= 5 || g.weeksLeft <= 0 || prev.money < cost) return prev;
+    return {
+      ...prev,
+      money: prev.money - cost,
+      yearStats: ysAdd(prev.yearStats, "exp", "liveops", cost),
+      rep: Math.min(100, (prev.rep ?? 50) + 1),
+      released: prev.released.map(x => x.id === gameId ? { ...x, patched: true, weeklyBase: x.weeklyBase * 1.15, spend: (x.spend || 0) + cost } : x),
+      log: pushLog(prev, `🩹 Patch shipped for "${g.name}" — word of mouth recovers (+15% weekly sales), and the fans notice you care.`),
+    };
+  });
+
+  const startDlc = gameId => update(prev => {
+    const g = prev.released.find(x => x.id === gameId);
+    const yr = yearOf(prev.week);
+    const size = SIZES.find(z => z.id === g?.size) || SIZES[0];
+    const cost = Math.round(sizeCost(size, yr) * 0.3);
+    if (!g || !prev.tech.includes("dlc") || g.live || g.port || g.dlcUntil || (g.dlcCount || 0) >= 2 || g.score < 65 || prev.money < cost) return prev;
+    return {
+      ...prev,
+      money: prev.money - cost,
+      yearStats: ysAdd(prev.yearStats, "exp", "dev", cost),
+      released: prev.released.map(x => x.id === gameId ? { ...x, dlcUntil: prev.week + ri(6, 9), spend: (x.spend || 0) + cost } : x),
+      log: pushLog(prev, `📦 DLC greenlit for "${g.name}" — a small crew peels off to build it (${money$(cost)}).`),
     };
   });
 
@@ -3342,7 +3423,7 @@ const slotOf = team => (team === "B" ? "projectB" : "project");
       {s.tab === "team"     && <TeamTab s={s} hire={hire} fire={fire} office={office} recruitAd={recruitAd} recruitHeadhunter={recruitHeadhunter} poachRival={poachRival} toggleRest={toggleRest} setLead={setLead} assignTeam={assignTeam} />}
       {s.tab === "research" && <ResearchTab s={s} buyTech={buyTech} buyEngineTech={buyEngineTech} buildEngine={buildEngine} updateEngine={updateEngine} toggleEngineLicense={toggleEngineLicense} licenseRivalEngine={licenseRivalEngine} startConsole={startConsole} />}
       {s.tab === "ip"       && <IpTab s={s} sellIp={sellIp} buyIp={buyIp} renameIp={renameIp} buybackPubIp={buybackPubIp} openTalks={openTalks} orderSequel={orderSequel} injectCapital={injectCapital} absorbSubsidiary={absorbSubsidiary} sellSubsidiary={sellSubsidiary} />}
-      {s.tab === "shelf"    && <ShelfTab s={s} rerelease={rerelease} portGame={portGame} liveUpdate={liveUpdate} sunsetLive={sunsetLive} shipExpansion={shipExpansion} />}
+      {s.tab === "shelf"    && <ShelfTab s={s} rerelease={rerelease} portGame={portGame} liveUpdate={liveUpdate} sunsetLive={sunsetLive} shipExpansion={shipExpansion} patchGame={patchGame} startDlc={startDlc} />}
       {s.tab === "stats"    && <StatsTab s={s} />}
 
       {/* NEXT WEEK — pinned to the bottom of the screen, easy to thumb */}
@@ -3603,6 +3684,25 @@ function StudioTab({ s, nextOffice, upgradeOffice, acceptContract, abandonContra
   const c = s.contracts?.active;
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 14 }}>
+      {(s.chart || []).length > 0 && (
+        <Panel title="THIS WEEK'S TOP 10" accent={C.gold}>
+          {s.chart.map(e => (
+            <div key={e.pos} style={{
+              display: "flex", alignItems: "center", gap: 10, padding: "5px 8px", borderRadius: 8, marginBottom: 2,
+              background: e.mine ? "#3A2050" : "transparent",
+            }}>
+              <div style={{ fontFamily: "'Bungee', cursive", fontSize: 14, color: e.pos === 1 ? C.gold : e.mine ? C.mag : C.dim, width: 28 }}>#{e.pos}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: e.mine ? C.ink : C.dim, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {e.name}{e.mine ? " ⭐" : ""}
+                </div>
+                <div style={{ fontSize: 11, color: C.dim }}>{e.mine ? "Your studio" : e.rivalName}</div>
+              </div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: e.mine ? C.green : C.dim }}>{money$(e.rev)}/wk</div>
+            </div>
+          ))}
+        </Panel>
+      )}
       <Panel title="THIS WEEK" accent={C.mag}>
         {s.trend && (
           <div style={{ fontSize: 14, color: C.mag, fontWeight: 700, marginBottom: 10 }}>
@@ -3933,9 +4033,25 @@ function DevTab({ s, startProject, releaseGame, marketPush, setPrice, setBiz, se
           </button>
         </Panel>
         <Panel title="LAUNCH CONTROL" accent={C.gold}>
-          <Btn small color={C.mag} disabled={s.money < 1500} onClick={() => marketPush(team)} style={{ width: "100%", marginBottom: 12 }}>
-            📣 Marketing push — $1,500
-          </Btn>
+          <div style={{ fontSize: 13, color: C.dim, letterSpacing: 1, margin: "0 0 6px" }}>MARKETING — PICK THE CROWD</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 12 }}>
+            {MKT_CHANNELS.map(ch => {
+              const fit = channelFit(ch, p.genre);
+              const gain = Math.round(ch.boost * fit * (s.tech.includes("mktdpt") ? 1.4 : 1));
+              return (
+                <button key={ch.id} disabled={s.money < ch.cost} onClick={() => marketPush(team, ch.id)} style={{
+                  padding: "8px 6px", minHeight: 52, borderRadius: 10, cursor: s.money < ch.cost ? "default" : "pointer",
+                  border: `2px solid ${C.line}`, background: C.panelHi, color: s.money < ch.cost ? C.dim : C.ink,
+                  fontFamily: "'Rubik', sans-serif", fontSize: 12, fontWeight: 700, touchAction: "manipulation",
+                }}>
+                  📣 {ch.name}
+                  <div style={{ fontSize: 10, color: fit >= 1.1 ? C.green : fit <= 0.8 ? C.red : C.dim, fontWeight: 400, marginTop: 2 }}>
+                    {money$(ch.cost)} · hype +{gain}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
           {band && (
             <div style={{ background: C.panelHi, borderRadius: 12, padding: "10px 14px", marginBottom: 12, fontSize: 14 }}>
               🔬 Focus testers predict: <b style={{ color: band[1] >= 75 ? C.gold : band[1] >= 55 ? C.cyan : C.red, fontFamily: "'Bungee', cursive" }}>{band[0]}–{band[1]}</b> <span style={{ color: C.dim }}>/ 100</span>
@@ -5148,7 +5264,7 @@ function StatsTab({ s }) {
   );
 }
 
-function ShelfTab({ s, rerelease, portGame, liveUpdate, sunsetLive, shipExpansion }) {
+function ShelfTab({ s, rerelease, portGame, liveUpdate, sunsetLive, shipExpansion, patchGame, startDlc }) {
   const yr = yearOf(s.week);
   const rrCost = Math.round(2000 * (1 + (yr - 1984) * 0.05));
   const luCost = Math.round(3000 * (1 + Math.max(0, yr - 2010) * 0.05));
@@ -5292,6 +5408,7 @@ function ShelfTab({ s, rerelease, portGame, liveUpdate, sunsetLive, shipExpansio
                 {g.mmo && <Tag>🌍 {g.sunset ? "MMO · Sunset" : `MMO · ${(g.subs || 0).toLocaleString()} subs · ${Math.round(g.health ?? 0)}% health`}</Tag>}
               </div>
               <Row k="Lifetime revenue" v={money$(g.salesTotal)} color={C.green} />
+              {g.chartPeak != null && <Row k="Chart peak" v={`#${g.chartPeak}`} color={g.chartPeak === 1 ? C.gold : C.cyan} />}
               {g.spend != null && (() => {
                 const net = Math.round(g.salesTotal + (g.funding || 0) - g.spend);
                 const target = g.spend - (g.funding || 0);
@@ -5335,6 +5452,32 @@ function ShelfTab({ s, rerelease, portGame, liveUpdate, sunsetLive, shipExpansio
                 );
               })()}
               {g.exclusive && <div style={{ fontSize: 12, color: C.cyan, margin: "6px 0" }}>🤝 {typeof g.exclusive === "string" ? g.exclusive : "Platform"} exclusive — can never be ported.</div>}
+              {(() => {
+                // Post-launch support: patch a buggy launch, or greenlight DLC
+                const patchCost = Math.round(1500 * (1 + (yr - 1984) * 0.05));
+                const canPatch = !g.patched && (g.bugsAtLaunch || 0) > 5 && g.weeksLeft > 0;
+                const dlcCost = Math.round(sizeCost(SIZES.find(z => z.id === g.size) || SIZES[0], yr) * 0.3);
+                const canDlc = s.tech.includes("dlc") && !g.live && !g.port && !g.dlcUntil && (g.dlcCount || 0) < 2 && g.score >= 65;
+                if (!canPatch && !canDlc && !g.dlcUntil) return null;
+                return (
+                  <div style={{ margin: "10px 0" }}>
+                    <div style={{ fontSize: 12, color: C.dim, letterSpacing: 1, marginBottom: 6 }}>🛠 POST-LAUNCH SUPPORT</div>
+                    <div style={{ display: "grid", gap: 6 }}>
+                      {canPatch && (
+                        <Btn small kind="ghost" color={C.cyan} disabled={s.money < patchCost} onClick={() => patchGame(g.id)} style={{ width: "100%" }}>
+                          🩹 Ship a patch · {money$(patchCost)} <span style={{ color: C.dim, fontWeight: 400 }}>({g.bugsAtLaunch} launch bugs hurt word of mouth — recover +15% sales)</span>
+                        </Btn>
+                      )}
+                      {g.dlcUntil && <div style={{ fontSize: 13, color: C.mag, fontWeight: 700 }}>📦 DLC in production — launches in {Math.max(0, g.dlcUntil - s.week)}w</div>}
+                      {canDlc && (
+                        <Btn small kind="ghost" color={C.mag} disabled={s.money < dlcCost} onClick={() => startDlc(g.id)} style={{ width: "100%" }}>
+                          📦 Greenlight DLC · {money$(dlcCost)} <span style={{ color: C.dim, fontWeight: 400 }}>(~6-9w · revives or extends the sales tail · {2 - (g.dlcCount || 0)} left)</span>
+                        </Btn>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
               {!g.live && g.weeksLeft > 0 && <Row k="Still selling" v={`${g.weeksLeft}w left`} color={C.cyan} />}
               {revs.map((r, i) => (
                 <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderTop: `1px solid ${C.line}` }}>
